@@ -12,6 +12,7 @@ httpcore==1.0.9
 httpx==0.28.1
 idna==3.20
 iniconfig==2.3.1
+mariadb==1.1.15
 packaging==26.4
 pluggy==1.7.0
 psycopg==3.2.9

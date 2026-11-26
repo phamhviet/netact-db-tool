@@ -26,12 +26,15 @@ class ImportFailure(Exception):
 
 
 def engine_for(config, database=_DEFAULT_DATABASE):
-    driver = {'mariadb': 'mysql+pymysql', 'mysql': 'mysql+pymysql', 'postgres': 'postgresql+psycopg'}[config.db_type]
+    driver = {'mariadb': 'mariadb+mariadbconnector', 'mysql': 'mysql+pymysql', 'postgres': 'postgresql+psycopg'}[config.db_type]
     options = {'connect_timeout': 10}
     if config.db_type == 'postgres':
         options['sslmode'] = config.ssl_mode
     elif config.ssl_mode == 'verify-full':
-        options['ssl'] = {'check_hostname': True}
+        if config.db_type == 'mariadb':
+            options.update(ssl=True, ssl_verify_cert=True)
+        else:
+            options['ssl'] = {'check_hostname': True}
     return create_engine(URL.create(driver, username=config.username, password=config.password.get_secret_value(),
                          host=config.host, port=config.port, database=config.database if database is _DEFAULT_DATABASE else database),
                          connect_args=options, pool_pre_ping=True)
@@ -234,8 +237,9 @@ def import_csvs(engine, files, progress):
                 # Positional insert deliberately matches the original script when a
                 # truncated table name reuses a table with different column names.
                 quoted = engine.dialect.identifier_preparer.quote_identifier(table_name)
-                placeholders = ', '.join('%s' for _ in columns)
-                # Both drivers use %s; the dialect preparer already escapes literal %.
+                marker = '?' if engine.dialect.paramstyle == 'qmark' else '%s'
+                placeholders = ', '.join(marker for _ in columns)
+                # Use the native mariadb '?' placeholders, matching the source script.
                 statement = f'INSERT INTO {quoted} VALUES ({placeholders})'
                 for line, row in enumerate(reader, 2):
                     values = (row + [''] * len(columns))[:len(columns)]

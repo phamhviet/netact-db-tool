@@ -18,6 +18,12 @@ client = TestClient(app)
 FIXTURE = Path(__file__).parent / 'fixtures/sample.xml'
 
 
+def execute_parameters(connection, statement, parameters):
+    if connection.dialect.paramstyle == 'qmark':
+        statement = statement.replace('%s', '?').replace('%%', '%')
+    return connection.exec_driver_sql(statement, parameters)
+
+
 def test_converter(tmp_path):
     files = convert(FIXTURE, tmp_path / 'csv')
     assert len(files) == 1
@@ -218,6 +224,9 @@ def test_real_database_workflow(db_type, port, user, tmp_path, monkeypatch):
     parsed = ConnectionConfig(**config)
     admin = engine_for(parsed, 'postgres' if db_type == 'postgres' else 'information_schema')
     target = None
+    if db_type == 'mariadb':
+        assert admin.dialect.driver == 'mariadbconnector'
+        assert admin.dialect.dbapi.__name__ == 'mariadb'
     try:
         diagnostics = client.post('/api/diagnostics', json=api_config)
         assert diagnostics.status_code == 200, diagnostics.text
@@ -449,8 +458,8 @@ def test_mariadb_schema_scoped_permissions(tmp_path):
     try:
         with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
             for account in (owner, limited):
-                conn.exec_driver_sql("CREATE USER %s@'%%' IDENTIFIED BY %s", (account, password))
-            conn.exec_driver_sql(f"GRANT ALL PRIVILEGES ON {quoted}.* TO %s@'%%'", (owner,))
+                execute_parameters(conn, "CREATE USER %s@'%%' IDENTIFIED BY %s", (account, password))
+            execute_parameters(conn, f"GRANT ALL PRIVILEGES ON {quoted}.* TO %s@'%%'", (owner,))
         cfg = ConnectionConfig(**{**root_config.model_dump(), 'username': owner, 'password': password, 'create_database': True})
         admin = administration_engine(cfg)
         assert admin.url.database is None  # No information_schema or target DB selected.
@@ -463,7 +472,7 @@ def test_mariadb_schema_scoped_permissions(tmp_path):
             conn.exec_driver_sql('CREATE TABLE sentinel (value VARCHAR(10))')
             conn.exec_driver_sql("INSERT INTO sentinel VALUES ('preserved')")
         with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
-            conn.exec_driver_sql(f"GRANT SELECT, INSERT, CREATE ON {quoted}.* TO %s@'%%'", (limited,))
+            execute_parameters(conn, f"GRANT SELECT, INSERT, CREATE ON {quoted}.* TO %s@'%%'", (limited,))
         denied_config = {**cfg.model_dump(mode='json'), 'username': limited, 'password': password}
         limited_cfg = ConnectionConfig(**denied_config)
         # SELECT 1 / CURRENT_USER does not require database recreation privileges.
@@ -489,6 +498,7 @@ def test_mariadb_schema_scoped_permissions(tmp_path):
             time.sleep(.05)
         assert job['operation'] == 'drop_database'
         assert job['error_code'] == '1044'
+        assert job['server_reply'].startswith('Access denied for user')
         assert password not in json.dumps(job)
         # The owner has privileges only on this schema, and can recreate it.
         owned.dispose()
@@ -497,8 +507,8 @@ def test_mariadb_schema_scoped_permissions(tmp_path):
         owned.dispose()
         # Distinguish successful DROP followed by denied CREATE.
         with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
-            conn.exec_driver_sql(f"REVOKE CREATE ON {quoted}.* FROM %s@'%%'", (limited,))
-            conn.exec_driver_sql(f"GRANT DROP ON {quoted}.* TO %s@'%%'", (limited,))
+            execute_parameters(conn, f"REVOKE CREATE ON {quoted}.* FROM %s@'%%'", (limited,))
+            execute_parameters(conn, f"GRANT DROP ON {quoted}.* TO %s@'%%'", (limited,))
         with pytest.raises(DatabaseOperationError) as caught:
             prepare_database(limited_cfg)
         details = failure_details(caught.value, 'database_connect', 'test', log_error=False)
@@ -511,7 +521,7 @@ def test_mariadb_schema_scoped_permissions(tmp_path):
         with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
             conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {quoted}')
             for account in (owner, limited):
-                conn.exec_driver_sql("DROP USER IF EXISTS %s@'%%'", (account,))
+                execute_parameters(conn, "DROP USER IF EXISTS %s@'%%'", (account,))
         root.dispose()
 
 
@@ -543,9 +553,9 @@ def test_missing_database_creates_without_attempting_drop(monkeypatch):
     target = None
     try:
         with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
-            conn.exec_driver_sql("CREATE USER %s@'%%' IDENTIFIED BY %s", (account, password))
+            execute_parameters(conn, "CREATE USER %s@'%%' IDENTIFIED BY %s", (account, password))
             # CREATE on this schema only; deliberately no DROP privilege.
-            conn.exec_driver_sql(f"GRANT CREATE ON {name}.* TO %s@'%%'", (account,))
+            execute_parameters(conn, f"GRANT CREATE ON {name}.* TO %s@'%%'", (account,))
         monkeypatch.setattr(importer, 'administration_engine', lambda config: creator)
         target = prepare_database(creator_cfg)
         with target.connect() as conn:
@@ -563,7 +573,7 @@ def test_missing_database_creates_without_attempting_drop(monkeypatch):
         creator.dispose()
         with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
             conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
-            conn.exec_driver_sql("DROP USER IF EXISTS %s@'%%'", (account,))
+            execute_parameters(conn, "DROP USER IF EXISTS %s@'%%'", (account,))
         root.dispose()
 
 

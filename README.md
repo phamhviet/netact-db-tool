@@ -7,7 +7,8 @@ Dùng nguyên file `boda-nokiacmdataparser.jar` do người dùng cung cấp; ph
 ## Chạy bằng Python (không cần Docker)
 
 Backend dùng **Python + FastAPI**, giao diện dùng HTML/CSS/JavaScript thuần, không dùng Bootstrap.
-Yêu cầu Python 3.11+ và Java 11+ (`java -version`). Đã kiểm thử Python 3.12 và Java 21.
+Yêu cầu Python 3.11+ và Java 11+ (`java -version`). Đã kiểm thử Python 3.12 và Java 21. MariaDB dùng đúng `mariadb` Connector/Python như script gốc;
+MySQL dùng PyMySQL, PostgreSQL dùng psycopg.
 Cài Python, Java và Git trước khi chạy; Java phải nằm trong PATH.
 
 ### Windows PowerShell
@@ -23,6 +24,18 @@ py -m venv .venv
 Không cần kích hoạt virtualenv hay đổi ExecutionPolicy khi dùng trực tiếp `python.exe` như trên.
 
 ### Linux / macOS
+
+Connector `mariadb==1.1.15` cần MariaDB Connector/C khi cài từ source. Trên Debian/Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y gcc python3-dev libmariadb-dev
+```
+
+Trên macOS: `brew install mariadb-connector-c pkg-config` và dùng compiler Xcode Command Line Tools.
+Nếu dùng Windows, ưu tiên Python 3.12 x64 (đã kiểm tra có wheel). Nếu pip yêu cầu build,
+cần MariaDB Connector/C và Visual C++ Build Tools phù hợp phiên bản Python.
+
 
 ```bash
 git clone https://github.com/phamhviet/netact-db-tool.git
@@ -179,10 +192,29 @@ Nếu thiếu quyền, nhờ người quản trị DB cấp quyền đúng phạ
 Không gửi mật khẩu hoặc toàn bộ SHOW GRANTS (có thể chứa thông tin xác thực) vào chat.
 Log chỉ ghi mã tác vụ, giai đoạn, thao tác, loại exception và mã lỗi; không ghi mật khẩu/SQL/dữ liệu XML.
 
+### Đối chiếu với script Python gốc đang chạy được
+
+MariaDB của bản web dùng `mariadb==1.1.15` (SQLAlchemy driver `mariadbconnector`),
+đúng loại connector `mariadb` và placeholder `?` của script gốc; MySQL vẫn dùng PyMySQL.
+Sau khi cập nhật cần cài lại `requirements.txt` và khởi động lại Python.
+
+Nếu cần đối chiếu cấu hình thực tế, chạy trên **chính máy đang chạy được script gốc**:
+
+```powershell
+.\.venv\Scripts\python.exe tools\compare_db_config.py "D:\duong-dan\netact_mariadb_import.py"
+```
+
+Công cụ chỉ phân tích các hằng username/password/host/port/database_name trong script,
+**không import/chạy script và không tạo/xóa DB**. Nó kết nối chỉ đọc bằng `mariadb.connect` trực tiếp như script gốc, rồi bằng đường kết nối web với .env,
+in `settings_match` cho host/port/user/password (chỉ true/false, không in mật khẩu),
+server/tài khoản thực tế và phạm vi quyền đã bỏ thông tin xác thực/hash.
+Dùng kết quả để xác định hai đường chạy có thật sự cùng cấu hình/server/tài khoản hay không.
+Nếu script lấy cấu hình qua hàm/biến phức tạp thay vì hằng literal, công cụ sẽ báo không đọc được cấu hình.
+
 ## Hành vi nhập và xử lý lỗi
 
-- Hỗ trợ MariaDB, PostgreSQL, MySQL qua SQLAlchemy. **MariaDB 11.4 và PostgreSQL 17 đã có kiểm thử tích hợp**;
-  MySQL dùng cùng driver PyMySQL nhưng chưa được kiểm thử với máy chủ MySQL riêng.
+- Hỗ trợ MariaDB, PostgreSQL, MySQL qua SQLAlchemy. **MariaDB 10.11 (native Connector/Python), 11.4 (bản trước) và PostgreSQL 17 đã có kiểm thử tích hợp**;
+  MySQL dùng driver PyMySQL riêng nhưng chưa được kiểm thử với máy chủ MySQL riêng.
 - Luồng import CSV bám theo script Python gốc: đọc header; thử encoding theo thứ tự UTF-8 BOM,
   CP1252, Latin-1, ISO-8859-1; bỏ qua file rỗng; quét toàn bộ dữ liệu để xác định độ dài lớn nhất từng cột.
 - Cột có độ dài lớn nhất từ 0–255 ký tự dùng `VARCHAR(max(1, độ_dài))`; trên 255 dùng `TEXT`.

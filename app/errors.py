@@ -51,12 +51,26 @@ class DatabaseOperationError(Exception):
         self.state = state
 
 
+def database_error_code(original):
+    number = getattr(original, 'errno', None)
+    if isinstance(number, int):
+        return str(number)
+    if original.args and isinstance(original.args[0], int):
+        return str(original.args[0])
+    sqlstate = getattr(original, 'sqlstate', None)
+    if isinstance(sqlstate, str) and len(sqlstate) == 5 and sqlstate.isascii() and sqlstate.isalnum():
+        return sqlstate
+    return None
+
+
 def access_denied_reply(exc, password):
-    if not isinstance(exc, DBAPIError) or not exc.orig.args or exc.orig.args[0] not in (1044, 1045):
+    if not isinstance(exc, DBAPIError) or database_error_code(exc.orig) not in ('1044', '1045'):
         return None
-    if len(exc.orig.args) < 2 or not isinstance(exc.orig.args[1], str):
+    reply = getattr(exc.orig, 'errmsg', None)
+    if not isinstance(reply, str):
+        reply = next((value for value in exc.orig.args if isinstance(value, str)), None)
+    if not reply:
         return None
-    reply = exc.orig.args[1]
     if password:
         reply = reply.replace(password, '[redacted]')
     # Allow only the standard account/database error shape, not arbitrary driver
@@ -76,11 +90,7 @@ def failure_details(exc, stage, job_id, log_error=True, password=None):
     reason = 'Lỗi chưa phân loại. Gửi giai đoạn và loại lỗi bên dưới để kiểm tra tiếp.'
     if isinstance(exc, DBAPIError):
         original = exc.orig
-        sqlstate = getattr(original, 'sqlstate', None)
-        if isinstance(sqlstate, str) and len(sqlstate) == 5 and sqlstate.isascii() and sqlstate.isalnum():
-            code = sqlstate
-        elif original.args and isinstance(original.args[0], int):
-            code = str(original.args[0])
+        code = database_error_code(original)
         reason = DATABASE_ERRORS.get(code, 'Database từ chối thao tác hoặc kết nối bị lỗi. Kiểm tra log database và quyền tài khoản.')
     elif isinstance(exc, OSError):
         code = f'OS-{exc.errno}' if isinstance(exc.errno, int) else None

@@ -41,7 +41,7 @@ def diagnose_connection(config):
                     server_info['current_role'] = conn.exec_driver_sql('SELECT CURRENT_ROLE()').scalar_one()
                 except SQLAlchemyError:
                     server_info['current_role'] = 'Không hỗ trợ truy vấn CURRENT_ROLE()'
-            return {'connection': {'db_type': config.db_type, 'host': config.host, 'port': config.port,
+            return {'connection': {'db_type': config.db_type, 'driver': engine.dialect.driver, 'host': config.host, 'port': config.port,
                                    'username': config.username, 'database': config.database,
                                    'create_database': config.create_database,
                                    'password_source': 'env' if config.use_saved_credentials else 'form'},

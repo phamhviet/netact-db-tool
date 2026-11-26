@@ -71,3 +71,14 @@ def test_missing_password_not_marked_configured(configured_env):
     with pytest.raises(ValidationError):
         ConnectionConfig(db_type='mariadb', host='localhost', port=3306, username='root',
                          database='test', use_saved_credentials=True)
+
+
+def test_reference_config_reader_never_executes_script(tmp_path):
+    from tools.compare_db_config import read_reference
+    path = tmp_path / 'original.py'
+    path.write_text("username='root'\npassword='local-only'\nhost='localhost'\nport=3307\ndatabase_name='netact'\n"
+                    "raise RuntimeError('SCRIPT MUST NOT EXECUTE')\n")
+    config = read_reference(path)
+    assert config.host == 'localhost'
+    assert config.port == 3307
+    assert config.password.get_secret_value() == 'local-only'
