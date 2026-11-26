@@ -5,7 +5,15 @@ Author: [viet.pham_hoang@nokia.com](mailto:viet.pham_hoang@nokia.com)
 A local web workspace for **Nokia RAML20 XML → CSV → database**, table browsing, SQL execution and CSV exports.
 The interface and runtime messages are in English. Accent color: `#266880`.
 
-[Tiếng Việt](README.md) · [Audit and validation](AUDIT.md)
+[Tiếng Việt](README_VI.md) · [Audit and validation](AUDIT.md)
+
+## Interface preview
+
+![XML import workspace with Nokia logo and author attribution](docs/interface.png)
+
+The current interface includes XML import, table browsing and a SQL workspace. Screenshots below use local sample data.
+
+[Mobile import view](docs/interface-mobile.png) · [Mobile table browser](docs/database-explorer-mobile.png) · [Mobile SQL workspace](docs/sql-workspace-mobile.png)
 
 ## Requirements
 
@@ -155,6 +163,13 @@ The parser requires Nokia RAML20 with managedObject elements. DOCTYPE declaratio
 Temporary import files are deleted after completion/failure. The JAR receives a temporary `input.xml`, so its FILENAME column uses that name.
 Import status is in memory (up to 100 recent jobs); restarting loses live status. Import failures can leave partial data, especially with MariaDB/MySQL implicit DDL commits. Check results before retrying.
 
+<details>
+<summary>Import report example with rejected tables</summary>
+
+![Import report with error details](docs/import-with-errors.png)
+
+</details>
+
 ## Browse tables
 
 1. Select **Database browser**, enter/select a connection, and **Connect & browse**.
@@ -166,6 +181,8 @@ The table viewer does not run COUNT(*) over every large table. Cells preview up 
 CSV uses UTF-8 BOM, a header, and proper quoting for commas, quotes and newlines. SQL NULL exports as an empty field; binary values use `base64:`; JSON values use JSON text.
 CSV preserves cell values; spreadsheet applications can interpret formula-like text. Use appropriate spreadsheet import settings when opening untrusted data.
 Live table export streams through a server-side cursor. If the DB/network fails during download, the file may be incomplete; retry the export.
+
+![Database table browser](docs/database-explorer.png)
 
 ## SQL workspace
 
