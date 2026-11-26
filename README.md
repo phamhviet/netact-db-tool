@@ -1,5 +1,7 @@
 # NetAct XML → Database
 
+Author: [viet.pham_hoang@nokia.com](mailto:viet.pham_hoang@nokia.com)
+
 **[English documentation / README_EN](README_EN.md)** · [Audit](AUDIT.md)
 
 Giao diện và thông báo của ứng dụng hiện dùng tiếng Anh. Trong Database browser có thêm tab SQL workspace

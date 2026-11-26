@@ -1,5 +1,7 @@
 # NetAct Database Tool
 
+Author: [viet.pham_hoang@nokia.com](mailto:viet.pham_hoang@nokia.com)
+
 A local web workspace for **Nokia RAML20 XML → CSV → database**, table browsing, SQL execution and CSV exports.
 The interface and runtime messages are in English. Accent color: `#266880`.
 
