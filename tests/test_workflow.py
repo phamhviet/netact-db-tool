@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -53,6 +54,44 @@ def test_doctype_without_entities_converts(tmp_path, doctype):
     assert ',001' in files[0].read_text()
     assert xml.read_text() == content  # Keep the uploaded original unchanged.
     assert not list(tmp_path.glob('normalized-*'))
+
+
+def test_actual_exporter_relative_dtd_matches_direct_jar(tmp_path):
+    # Match the supplied export's structure using synthetic site names/IDs.
+    xml = tmp_path / 'actual.xml'
+    objects = ['<managedObject class="PLMN" version="1.0" distName="PLMN-PLMN" id="1"/>']
+    for number in [1, 10, 11, 12, 2, 3, 4, 5, 6, 7, 8, 9]:
+        objects.append(f'<managedObject class="MRSITE" version="1.0" '
+                       f'distName="PLMN-PLMN/MRSITE-{number}" id="{100 + number}">'
+                       f'<p name="name">Trạm thử nghiệm {number}</p></managedObject>')
+    for kind in ['EXCENBF', 'EXCCG', 'EXCCU']:
+        objects.append(f'<managedObject class="{kind}" version="1.0" '
+                       f'distName="PLMN-PLMN/{kind}-1" id="200">'
+                       '<defaults name="System"/></managedObject>')
+    objects.extend([
+        '<managedObject class="NETACT" version="8" distName="PLMN-PLMN/NETACT-1" id="300"/>',
+        '<managedObject class="HPHW" version="11isdk" distName="PLMN-PLMN/HPHW-1" id="400"/>',
+    ])
+    xml.write_text('<?xml version="1.0" encoding="UTF-8"?>\n'
+                   "<!DOCTYPE raml SYSTEM 'raml20.dtd'>\n"
+                   '<raml version="2.0" xmlns="raml20.xsd"><cmData type="actual">'
+                   '<header><log dateTime="2026-01-01T10:25:39.000+07:00" '
+                   'action="created" appInfo="ActualExporter">UIValues are used</log></header>'
+                   + ''.join(objects) + '</cmData></raml>', encoding='utf-8')
+    direct = tmp_path / 'direct'
+    direct.mkdir()
+    jar = Path(__file__).resolve().parents[1] / 'vendor/boda-nokiacmdataparser.jar'
+    raw_result = subprocess.run(['java', '-Dfile.encoding=UTF-8', '-jar', str(jar),
+                                 '-i', str(xml), '-o', str(direct)],
+                                cwd=tmp_path, capture_output=True, timeout=30)
+    assert raw_result.returncode == 0
+    normalized_files = convert(xml, tmp_path / 'normalized-csv')
+    raw_files = sorted(direct.rglob('*.csv'))
+    assert raw_files
+    raw = {p.name: p.read_bytes() for p in raw_files}
+    normalized = {p.name: p.read_bytes() for p in normalized_files}
+    assert normalized == raw
+    assert any('Trạm thử nghiệm 1' in p.read_text() for p in normalized_files)
 
 
 def test_normalization_preserves_utf16_namespaces_and_values(tmp_path):
