@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 
 from app.main import app, ConnectionConfig
-from app.importer import ImportFailure, convert, engine_for, import_csvs, unique_names
+from app.importer import ImportFailure, convert, engine_for, import_csvs, unique_names, normalize_xml
 
 client = TestClient(app)
 FIXTURE = Path(__file__).parent / 'fixtures/sample.xml'
@@ -29,10 +29,70 @@ def test_names_utf8_and_duplicates():
     assert all(len(n.encode()) <= 63 for n in names)
 
 
-def test_dtd_rejected(tmp_path):
+def test_entity_rejected(tmp_path):
     xml = tmp_path / 'bad.xml'
     xml.write_text('<!DOCTYPE x [<!ENTITY x "secret">]><x>&x;</x>')
-    with pytest.raises(Exception):
+    with pytest.raises(ImportFailure, match='khai báo entity'):
+        convert(xml, tmp_path / 'csv')
+    assert not (tmp_path / 'csv').exists()
+
+
+@pytest.mark.parametrize('doctype', [
+    '<!DOCTYPE raml>',
+    '<!DOCTYPE raml SYSTEM "https://example.invalid/private.dtd">',
+    '<!DOCTYPE raml PUBLIC "raml" "file:///nonexistent/private.dtd">',
+])
+def test_doctype_without_entities_converts(tmp_path, doctype):
+    original = FIXTURE.read_text()
+    content = original.replace('<raml ', doctype + '\n<raml ', 1)
+    xml = tmp_path / 'with-dtd.xml'
+    xml.write_text(content, encoding='utf-8')
+    files = convert(xml, tmp_path / 'csv')
+    assert len(files) == 1
+    assert 'Trạm Hà Nội' in files[0].read_text()
+    assert ',001' in files[0].read_text()
+    assert xml.read_text() == content  # Keep the uploaded original unchanged.
+    assert not list(tmp_path.glob('normalized-*'))
+
+
+def test_normalization_preserves_utf16_namespaces_and_values(tmp_path):
+    xml = tmp_path / 'utf16.xml'
+    xml.write_text('<?xml version="1.0" encoding="UTF-16"?>'
+                   '<n:raml xmlns:n="raml20.xsd" a="A &amp; B"><n:p>Hà Nội &lt; 2</n:p></n:raml>',
+                   encoding='utf-16')
+    normalized = tmp_path / 'normalized.xml'
+    normalize_xml(xml, normalized)
+    from xml.etree.ElementTree import parse
+    root = parse(normalized).getroot()
+    assert root.tag == '{raml20.xsd}raml'
+    assert root.attrib['a'] == 'A & B'
+    assert root[0].text == 'Hà Nội < 2'
+
+
+def test_invalid_xml_has_position_without_contents(tmp_path):
+    xml = tmp_path / 'broken.xml'
+    xml.write_text('<raml>\n<private>DO_NOT_ECHO & broken</private></raml>')
+    with pytest.raises(ImportFailure, match='dòng 2, cột') as error:
+        convert(xml, tmp_path / 'csv')
+    assert 'DO_NOT_ECHO' not in str(error.value)
+    assert not (tmp_path / 'csv').exists()
+    assert not list(tmp_path.glob('normalized-*'))
+
+
+def test_external_entity_rejected(tmp_path):
+    xml = tmp_path / 'external.xml'
+    xml.write_text('<!DOCTYPE raml [<!ENTITY private SYSTEM "file:///etc/passwd">]>'
+                   '<raml>&private;</raml>')
+    with pytest.raises(ImportFailure, match='khai báo entity'):
+        convert(xml, tmp_path / 'csv')
+    assert not (tmp_path / 'csv').exists()
+
+
+def test_entity_from_skipped_dtd_never_dropped_silently(tmp_path):
+    xml = tmp_path / 'missing-entity.xml'
+    xml.write_text('<!DOCTYPE raml SYSTEM "https://example.invalid/private.dtd">'
+                   '<raml>&private;</raml>')
+    with pytest.raises(ImportFailure, match='entity'):
         convert(xml, tmp_path / 'csv')
     assert not (tmp_path / 'csv').exists()
 
@@ -47,6 +107,32 @@ def test_api_validation():
     assert 'DO_NOT_ECHO' not in response.text
     assert client.get('/api/jobs/missing').status_code == 404
     assert client.post('/api/jobs', headers={'Origin': 'https://other.example'}).status_code == 403
+
+
+def test_job_reports_xml_position_without_connecting_to_database(monkeypatch):
+    import importlib
+    main = importlib.import_module('app.main')
+
+    def unexpected_database(*args):
+        pytest.fail('Invalid XML must fail before database access')
+
+    monkeypatch.setattr(main, 'prepare_database', unexpected_database)
+    config = dict(db_type='postgres', host='127.0.0.1', port=5432, database='unused',
+                  username='unused', password='DO_NOT_ECHO_PASSWORD')
+    response = client.post('/api/jobs', data={'config': json.dumps(config)},
+                           files={'file': ('bad.xml', b'<raml>\n<p>PRIVATE_XML & broken</p></raml>', 'application/xml')})
+    assert response.status_code == 202
+    job_id = response.json()['id']
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = client.get(f'/api/jobs/{job_id}').json()
+        if job['status'] in ('completed', 'failed'):
+            break
+        time.sleep(.01)
+    assert job['status'] == 'failed'
+    assert 'dòng 2, cột' in job['message']
+    assert 'PRIVATE_XML' not in json.dumps(job)
+    assert 'DO_NOT_ECHO_PASSWORD' not in json.dumps(job)
 
 
 @pytest.mark.parametrize('db_type,port,user', [('postgres',55432,'postgres'), ('mariadb',53306,'root')])

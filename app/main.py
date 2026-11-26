@@ -10,8 +10,6 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
-from defusedxml.common import DefusedXmlException
-from xml.etree.ElementTree import ParseError
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import text
@@ -68,8 +66,6 @@ def run_job(job_id, config, folder):
         result = import_csvs(engine, files, lambda percent, message: update(job_id, progress=percent, message=message))
         update(job_id, status='completed', progress=100, message='Hoàn tất chuyển đổi và nhập dữ liệu.',
                tables=result, total_rows=sum(t['rows'] for t in result))
-    except (DefusedXmlException, ParseError):
-        update(job_id, status='failed', message='XML không hợp lệ hoặc chứa DTD/entity không được hỗ trợ.')
     except ImportFailure as exc:
         update(job_id, status='failed', message=str(exc))
     except Exception:

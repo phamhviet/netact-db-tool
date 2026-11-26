@@ -82,7 +82,7 @@ Dừng bằng `docker compose down`.
   Tiến độ phản ánh các giai đoạn và số bảng đã xử lý, không phải phần trăm byte chính xác.
 - Không giới hạn dung lượng XML ở giao diện hoặc backend; không còn dùng `MAX_UPLOAD_MB`.
   File được sao chép theo khối 1 MB, không đọc toàn bộ file upload vào RAM.
-  Multipart có thể spool xuống ổ đĩa trước đó: cần đủ ổ đĩa tạm cho multipart, XML và CSV.
+  Multipart có thể spool xuống ổ đĩa trước đó: cần đủ ổ đĩa tạm cho multipart, XML gốc, XML chuẩn hóa và CSV.
   Nếu dùng Nginx, đặt `client_max_body_size 0;` và tăng timeout proxy phù hợp cho upload dài;
   các proxy/gateway khác có thể có giới hạn riêng cần cấu hình ở đó.
 - Không đặt timeout chuyển đổi JAR hoặc ép heap ở 1 GB. JVM chọn heap theo RAM khả dụng.
@@ -90,7 +90,9 @@ Dừng bằng `docker compose down`.
   (PowerShell: `$env:JAVA_TOOL_OPTIONS="-Xmx8g"`; Linux: `export JAVA_TOOL_OPTIONS="-Xmx8g"`).
   Không giới hạn dung lượng upload không đồng nghĩa RAM/ổ đĩa vô hạn; khả năng xử lý vẫn phụ thuộc
   tài nguyên máy chủ và parser JAR. Chưa benchmark bằng XML thực tế dung lượng nhiều GB.
-  XML phải đúng Nokia RAML20, không DTD/entity.
+  XML phải đúng Nokia RAML20. Hỗ trợ khai báo DOCTYPE không chứa entity: ứng dụng chuẩn hóa XML theo luồng
+  sang UTF-8 và loại DOCTYPE trước khi gọi JAR, không tải DTD ngoài. File upload gốc không bị sửa.
+  Khai báo entity bị từ chối; cần xuất XML với giá trị trực tiếp. Lỗi cú pháp được báo theo dòng/cột của file gốc.
   Đây không phải bộ chuyển đổi cho mọi cấu trúc XML. File tạm có tên `input.xml`, nên cột FILENAME của CSV mang tên đó.
 - XML, CSV và log JAR tạm bị xóa sau tác vụ; không lưu mật khẩu vào cấu hình, log hoặc kết quả.
   Mật khẩu dùng trong bộ nhớ của tiến trình để kết nối và được xóa khỏi form sau khi nhận tác vụ.

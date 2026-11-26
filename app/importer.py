@@ -1,9 +1,14 @@
 import csv
 import shutil
 import subprocess
+import tempfile
+from xml.sax import SAXParseException
+from xml.sax.handler import feature_external_ges
+from xml.sax.saxutils import XMLGenerator
 from pathlib import Path
 
-from defusedxml.ElementTree import iterparse
+from defusedxml.common import DefusedXmlException
+from defusedxml.expatreader import DefusedExpatParser
 from sqlalchemy import Column, MetaData, Table, Text, create_engine, inspect
 from sqlalchemy.engine import URL
 
@@ -41,26 +46,60 @@ def prepare_database(config):
     return engine_for(config)
 
 
+class NoExternalDtdParser(DefusedExpatParser):
+    def defused_external_entity_ref_handler(self, context, base, sysid, pubid):
+        if context is None:
+            # An external DTD subset: acknowledge without opening its URL/file.
+            return 1
+        return super().defused_external_entity_ref_handler(context, base, sysid, pubid)
+
+
+class CompleteXMLGenerator(XMLGenerator):
+    def skippedEntity(self, name):
+        # Skipping a DTD must never silently remove an unresolved parameter value.
+        raise ImportFailure(
+            'XML tham chiếu entity chưa có giá trị trực tiếp. '
+            'Hãy xuất lại XML không phụ thuộc entity/DTD bên ngoài.'
+        )
+
+
+def normalize_xml(xml_path, destination):
+    # SAX streams text/attributes without building a tree. XMLGenerator emits no
+    # DOCTYPE; the JAR therefore never sees DTD URLs or entity declarations.
+    parser = NoExternalDtdParser(forbid_dtd=False, forbid_entities=True, forbid_external=True)
+    parser.setFeature(feature_external_ges, False)
+    try:
+        with destination.open('wb') as stream:
+            parser.setContentHandler(CompleteXMLGenerator(stream, encoding='utf-8'))
+            with xml_path.open('rb') as source:
+                parser.parse(source)
+    except DefusedXmlException:
+        raise ImportFailure(
+            'XML có khai báo entity hoặc tham chiếu bên ngoài không được hỗ trợ. '
+            'Hãy xuất lại XML với giá trị trực tiếp thay cho entity. '
+            'DOCTYPE không chứa entity vẫn được hỗ trợ.'
+        ) from None
+    except SAXParseException as exc:
+        raise ImportFailure(
+            f'XML không đúng cú pháp tại dòng {exc.getLineNumber()}, cột {exc.getColumnNumber() + 1}. '
+            'Kiểm tra ký tự &, thẻ đóng/mở, encoding và file XML có bị cắt thiếu hay không.'
+        ) from None
+
+
 def convert(xml_path, output):
-    # Validate without retaining the whole XML tree and reject DTDs / external entities.
-    stack = []
-    for event, element in iterparse(xml_path, events=('start', 'end'), forbid_dtd=True, forbid_entities=True, forbid_external=True):
-        if event == 'start':
-            stack.append(element)
-        else:
-            stack.pop()
-            if stack:
-                stack[-1].remove(element)
-            element.clear()
     if not shutil.which('java'):
         raise ImportFailure('Không tìm thấy Java. Cần Java 11 trở lên trên máy chủ.')
-    output.mkdir(exist_ok=True)
-    # Let the JVM choose heap size from available RAM; JAVA_TOOL_OPTIONS can override it.
-    with (output.parent / 'parser.log').open('wb') as log:
-        result = subprocess.run(['java', '-Dfile.encoding=UTF-8', '-jar',
-                                 str(ROOT / 'vendor/boda-nokiacmdataparser.jar'),
-                                 '-i', str(xml_path), '-o', str(output)],
-                                stdout=log, stderr=subprocess.STDOUT, cwd=output.parent)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='normalized-', dir=output.parent) as temporary:
+        normalized = Path(temporary) / xml_path.name
+        normalize_xml(xml_path, normalized)
+        output.mkdir(exist_ok=True)
+        # Let the JVM choose heap size from available RAM; JAVA_TOOL_OPTIONS can override it.
+        with (output.parent / 'parser.log').open('wb') as log:
+            result = subprocess.run(['java', '-Dfile.encoding=UTF-8', '-jar',
+                                     str(ROOT / 'vendor/boda-nokiacmdataparser.jar'),
+                                     '-i', str(normalized), '-o', str(output)],
+                                    stdout=log, stderr=subprocess.STDOUT, cwd=output.parent)
     files = sorted(output.rglob('*.csv'))
     if result.returncode or not files:
         raise ImportFailure('JAR không tạo được CSV. Kiểm tra XML đúng định dạng Nokia RAML20 và có managedObject.')
