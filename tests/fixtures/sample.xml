@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raml xmlns="raml20.xsd" version="2.0">
+<cmData type="actual" scope="all" name="test">
+<header><log dateTime="2026-11-26T00:00:00" action="created" appInfo="test"/></header>
+<managedObject class="LNBTS" distName="PLMN-PLMN/MRBTS-1/LNBTS-1" version="1" operation="create">
+<p name="name">Trạm Hà Nội</p><p name="id">001</p>
+</managedObject>
+<managedObject class="LNBTS" distName="PLMN-PLMN/MRBTS-2/LNBTS-2" version="1" operation="create">
+<p name="name">Station B</p><p name="id">002</p>
+</managedObject>
+</cmData></raml>
