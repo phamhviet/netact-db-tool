@@ -12,7 +12,7 @@
   for (const button of document.querySelectorAll('[data-view]')) {
     button.addEventListener('click', () => {
       const browse = button.dataset.view === 'browser';
-      el('workspace-label').textContent = browse ? 'DATA TOOLS / Duyệt database' : 'DATA TOOLS / XML Import';
+      el('workspace-label').textContent = browse ? 'DATA TOOLS / Database browser' : 'DATA TOOLS / XML Import';
       el('workspace-badge').textContent = browse ? 'DATABASE VIEWER' : 'NOKIA RAML20';
       document.querySelectorAll('[data-view]').forEach(node => node.setAttribute('aria-pressed', String(node === button)));
       el('browser-view').hidden = !browse; el('import-view').hidden = browse;
@@ -26,11 +26,9 @@
     if (!postgres && el('browse-ssl_mode').value === 'require') el('browse-ssl_mode').value = 'disable';
   });
   async function api(path, body) {
-    const response = await fetch(`/api/browser/${path}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    const data = await response.json();
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Yêu cầu không hợp lệ.');
-    return data;
+    return window.NetActUI.request(`/api/browser/${path}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   }
+
   function message(text = '', error = false) {
     el('browse-message').textContent = text; el('browse-message').className = error ? 'error' : '';
   }
@@ -46,7 +44,7 @@
     const filter = el('browse-filter').value.toLocaleLowerCase();
     el('browse-tables').replaceChildren();
     const visible = tables.filter(name => name.toLocaleLowerCase().includes(filter));
-    el('browse-table-count').textContent = `${visible.length} / ${tables.length} bảng`;
+    el('browse-table-count').textContent = `${visible.length} / ${tables.length} tables`;
     for (const name of visible) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = name;
       button.className = name === table ? 'selected' : ''; button.disabled = loading;
@@ -57,7 +55,7 @@
   function clearTable() {
     table = null; offset = 0; hasNext = false;
     el('browse-head').replaceChildren(); el('browse-rows').replaceChildren();
-    el('browse-table-name').textContent = 'Chọn bảng để xem'; el('browse-table-info').textContent = '';
+    el('browse-table-name').textContent = 'Select a table'; el('browse-table-info').textContent = '';
     el('browse-page-info').textContent = ''; message();
   }
   async function loadTables() {
@@ -69,37 +67,25 @@
       for (const name of result.schemas) {const option = new Option(name, name); el('browse-schema').appendChild(option);}
       el('browse-schema').value = schema;
       el('browse-data').hidden = false; renderList();
-      if (!tables.length) message('Schema này chưa có bảng hoặc tài khoản không thấy bảng nào.');
+      document.dispatchEvent(new CustomEvent('netact:database', {detail:{connected:true, schema, schemas:result.schemas}}));
+      if (!tables.length) message('This schema has no visible tables.');
       return true;
     } catch (error) {clearTable(); tables = []; renderList(); message(error.message, true); throw error;}
     finally {setLoading(false);}
   }
   async function loadRows() {
     if (!connection || !table) return;
-    setLoading(true); message('Đang tải dữ liệu…');
+    setLoading(true); message('Loading data…');
     el('browse-head').replaceChildren(); el('browse-rows').replaceChildren();
     el('browse-table-name').textContent = `${schema}.${table}`;
     el('browse-table-info').textContent = ''; el('browse-page-info').textContent = '';
     try {
       const data = await api('rows', {config:connection, schema_name:schema, table, offset, page_size:Number(el('browse-page-size').value)});
-      const heading = document.createElement('tr');
-      for (const name of data.columns) {const cell = document.createElement('th'); cell.textContent = name; heading.appendChild(cell);}
-      el('browse-head').appendChild(heading);
-      for (const values of data.rows) {
-        const row = document.createElement('tr');
-        for (const value of values) {
-          const cell = document.createElement('td');
-          cell.textContent = value === null ? 'NULL' : value.slice(0, 500);
-          if (value === null) cell.className = 'null-cell';
-          if (value !== null && value.length > 500) cell.append('…');
-          row.appendChild(cell);
-        }
-        el('browse-rows').appendChild(row);
-      }
+      window.NetActUI.renderGrid(el('browse-head'), el('browse-rows'), data.columns, data.rows);
       hasNext = data.has_next;
-      el('browse-table-info').textContent = `${data.columns.length} cột · ${data.ordered ? 'Sắp xếp theo khóa chính' : 'Bảng không có khóa chính; thứ tự dòng không cố định'}`;
-      el('browse-page-info').textContent = data.rows.length ? `Dòng ${offset + 1}–${offset + data.rows.length}` : 'Không có dòng dữ liệu';
-      message('Ô dài hiển thị tối đa 500 ký tự. Export CSV lấy đầy đủ mọi dòng và giá trị.');
+      el('browse-table-info').textContent = `${data.columns.length} columns · ${data.ordered ? 'Ordered by primary key' : 'No primary key; row order is not guaranteed'}`;
+      el('browse-page-info').textContent = data.rows.length ? `Rows ${offset + 1}–${offset + data.rows.length}` : 'No rows to display';
+      message('Cells show up to 500 characters. CSV export includes every row and the full values.');
     } catch (error) {hasNext = false; message(error.message, true);}
     finally {setLoading(false);}
   }
@@ -109,13 +95,13 @@
     connection.use_saved_credentials = el('browse-use_saved_credentials').checked;
     connection.port = Number(connection.port); connection.create_database = false; schema = null;
     el('browse-connect').disabled = true;
-    el('browse-connection').textContent = 'Đang kết nối…';
+    el('browse-connection').textContent = 'Connecting…';
     try {
       await loadTables();
       el('browse-password').value = '';
       fieldIds.forEach(id => {el(`browse-${id}`).disabled = true;});
       el('browse-disconnect').hidden = false;
-      el('browse-connection').textContent = `Đã kết nối ${connection.host}:${connection.port} / ${connection.database}`;
+      el('browse-connection').textContent = `Connected to ${connection.host}:${connection.port} / ${connection.database}`;
       el('browse-connection').className = 'success';
     } catch (error) {
       connection = null; el('browse-data').hidden = true;
@@ -125,14 +111,16 @@
   });
   el('browse-disconnect').addEventListener('click', () => {
     if (loading) return;
+    document.dispatchEvent(new CustomEvent('netact:database', {detail:{connected:false}}));
     connection = null; schema = null; tables = []; clearTable();
     el('browse-data').hidden = true; el('browse-disconnect').hidden = true;
-    el('browse-connection').textContent = 'Đã ngắt kết nối.'; el('browse-connection').className = '';
+    el('browse-connection').textContent = 'Disconnected.'; el('browse-connection').className = '';
     fieldIds.forEach(id => {el(`browse-${id}`).disabled = false;});
     el('browse-password').value = ''; el('browse-tls-require').disabled = el('browse-db_type').value !== 'postgres';
     el('browse-connect').disabled = false;
     window.NetActPresets.refresh('browse-');
   });
+  window.NetActBrowser = {connection: () => connection, setBusy(value) {setLoading(value); el('browse-disconnect').disabled=value;}};
   window.NetActPresets.bind('browse-');
   el('browse-filter').addEventListener('input', renderList);
   el('browse-schema').addEventListener('change', async () => {schema = el('browse-schema').value; try {await loadTables();} catch {}});
@@ -143,9 +131,7 @@
   el('browse-export').addEventListener('click', () => {
     if (!connection || !table || loading) return;
     // Native download streams to disk; fetch().blob() would buffer a large export in browser RAM.
-    const form = document.createElement('form'); form.method = 'POST'; form.action = '/api/browser/export'; form.target = '_blank'; form.rel = 'noopener';
-    const input = document.createElement('input'); input.type = 'hidden'; input.name = 'query'; input.value = JSON.stringify({config:connection, schema_name:schema, table});
-    form.appendChild(input); document.body.appendChild(form); form.submit(); form.remove();
-    message('Đã yêu cầu tải toàn bộ bảng. Nếu export lỗi, thông báo sẽ xuất hiện ở tab mới.');
+    window.NetActUI.download('/api/browser/export', 'query', {config:connection, schema_name:schema, table});
+    message('Full-table download requested. An export error will appear in the new tab.');
   });
 })();

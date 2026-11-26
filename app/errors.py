@@ -5,46 +5,49 @@ import re
 
 from sqlalchemy.exc import DBAPIError
 
-logger = logging.getLogger('netact')
-STAGES = {'xml_to_csv': 'Chuyển XML sang CSV', 'database_connect': 'Kết nối/tạo database',
-          'csv_to_database': 'Tạo bảng/nhập CSV'}
+logger = logging.getLogger("netact")
+STAGES = {
+    "xml_to_csv": "XML to CSV conversion",
+    "database_connect": "Database connection/setup",
+    "csv_to_database": "Table creation/CSV import",
+}
 DATABASE_ERRORS = {
-    '1045': 'Sai tài khoản/mật khẩu hoặc tài khoản không được phép kết nối từ máy chủ web.',
-    '1044': 'Máy chủ trả về Access denied đối với database. Cần đối chiếu tài khoản và phản hồi gốc của máy chủ.',
-    '1049': 'Database chưa tồn tại. Tạo trước hoặc chọn Tạo database mới.',
-    '1007': 'Database đã tồn tại hoặc đang được tạo bởi tác vụ khác. Kiểm tra tên đích và quyền DROP/CREATE.',
-    '1142': 'Tài khoản thiếu quyền thực hiện thao tác trên bảng (CREATE/INSERT/SELECT/DROP).',
-    '1050': 'Bảng đã tồn tại trong database đích.',
-    '1118': 'Bảng vượt giới hạn kích thước một dòng của MariaDB/MySQL.',
-    '1117': 'Bảng vượt số cột mà database hỗ trợ.',
-    '1406': 'Giá trị vượt dung lượng kiểu cột đích; MariaDB/MySQL TEXT tối đa 65.535 byte.',
-    '1366': 'Giá trị hoặc bảng mã không tương thích với cột đích. Kiểm tra UTF-8/utf8mb4.',
-    '2003': 'Không tới được máy chủ database. Kiểm tra host, port, firewall và quyền truy cập mạng.',
-    '2005': 'Không phân giải được hostname database.',
-    '2006': 'Máy chủ database đã đóng kết nối. Kiểm tra log DB, timeout và max_allowed_packet.',
-    '2013': 'Mất kết nối trong khi truy vấn. Kiểm tra log DB, mạng và timeout.',
-    '1153': 'Gói dữ liệu vượt max_allowed_packet của database.',
-    '28P01': 'Sai thông tin xác thực PostgreSQL.',
-    '28000': 'PostgreSQL từ chối xác thực. Kiểm tra tài khoản và pg_hba.conf.',
-    '3D000': 'Database chưa tồn tại. Tạo trước hoặc chọn Tạo database mới.',
-    '42501': 'Tài khoản PostgreSQL thiếu quyền trên database/schema/bảng.',
-    '42P04': 'Database đã tồn tại hoặc đang được tạo bởi tác vụ khác. Kiểm tra tên đích và quyền DROP/CREATE.',
-    '42P07': 'Bảng đã tồn tại trong schema đích.',
-    '54011': 'Bảng vượt số cột PostgreSQL hỗ trợ.',
-    '54000': 'Dữ liệu vượt giới hạn của PostgreSQL.',
-    '22021': 'Dữ liệu chứa ký tự hoặc encoding PostgreSQL không chấp nhận.',
-    '22001': 'Giá trị vượt dung lượng kiểu cột đích.',
-    '53100': 'Máy chủ PostgreSQL hết dung lượng ổ đĩa.',
-    '53200': 'Máy chủ PostgreSQL không đủ bộ nhớ.',
-    '53300': 'Máy chủ PostgreSQL đã hết kết nối khả dụng.',
-    '08001': 'Không thiết lập được kết nối PostgreSQL.',
-    '08006': 'Mất kết nối PostgreSQL trong quá trình xử lý.',
+    "1045": "Invalid credentials or this account cannot connect from the web server.",
+    "1044": "The server returned Access denied. Compare the actual account and server response.",
+    "1049": "The database does not exist. Create it first or enable Create database.",
+    "1007": "The database already exists or another process is creating it. Check the target and DROP/CREATE permissions.",
+    "1142": "This account lacks the required table privileges (CREATE/INSERT/SELECT/DROP).",
+    "1050": "The table already exists in the target database.",
+    "1118": "The table exceeds the MariaDB/MySQL row-size limit.",
+    "1117": "The table exceeds the database column-count limit.",
+    "1406": "A value exceeds the column capacity; MariaDB/MySQL TEXT supports up to 65,535 bytes.",
+    "1366": "A value or encoding is incompatible with its column. Check UTF-8/utf8mb4.",
+    "2003": "Cannot reach the database server. Check host, port, firewall and network access.",
+    "2005": "Cannot resolve the database hostname.",
+    "2006": "The database closed the connection. Check DB logs, timeouts and max_allowed_packet.",
+    "2013": "Connection lost during the query. Check DB logs, network and timeouts.",
+    "1153": "The packet exceeds the database max_allowed_packet setting.",
+    "28P01": "Invalid PostgreSQL credentials.",
+    "28000": "PostgreSQL rejected authentication. Check the account and pg_hba.conf.",
+    "3D000": "The database does not exist. Create it first or enable Create database.",
+    "42501": "The PostgreSQL account lacks database/schema/table privileges.",
+    "42P04": "The database already exists or another process is creating it. Check the target and DROP/CREATE permissions.",
+    "42P07": "The table already exists in the target schema.",
+    "54011": "The table exceeds the PostgreSQL column-count limit.",
+    "54000": "The data exceeds a PostgreSQL limit.",
+    "22021": "The data contains a character or encoding PostgreSQL cannot accept.",
+    "22001": "A value exceeds the target column capacity.",
+    "53100": "The PostgreSQL server is out of disk space.",
+    "53200": "The PostgreSQL server is out of memory.",
+    "53300": "The PostgreSQL server has no available connections.",
+    "08001": "Cannot establish a PostgreSQL connection.",
+    "08006": "The PostgreSQL connection was lost.",
 }
 
 
 class DatabaseOperationError(Exception):
-    def __init__(self, operation, original, database, state='unchanged'):
-        super().__init__('Database operation failed')
+    def __init__(self, operation, original, database, state="unchanged"):
+        super().__init__("Database operation failed")
         self.operation = operation
         self.original = original
         self.database = database
@@ -52,30 +55,33 @@ class DatabaseOperationError(Exception):
 
 
 def database_error_code(original):
-    number = getattr(original, 'errno', None)
+    number = getattr(original, "errno", None)
     if isinstance(number, int):
         return str(number)
     if original.args and isinstance(original.args[0], int):
         return str(original.args[0])
-    sqlstate = getattr(original, 'sqlstate', None)
+    sqlstate = getattr(original, "sqlstate", None)
     if isinstance(sqlstate, str) and len(sqlstate) == 5 and sqlstate.isascii() and sqlstate.isalnum():
         return sqlstate
     return None
 
 
 def access_denied_reply(exc, password):
-    if not isinstance(exc, DBAPIError) or database_error_code(exc.orig) not in ('1044', '1045'):
+    if not isinstance(exc, DBAPIError) or database_error_code(exc.orig) not in ("1044", "1045"):
         return None
-    reply = getattr(exc.orig, 'errmsg', None)
+    reply = getattr(exc.orig, "errmsg", None)
     if not isinstance(reply, str):
         reply = next((value for value in exc.orig.args if isinstance(value, str)), None)
     if not reply:
         return None
     if password:
-        reply = reply.replace(password, '[redacted]')
+        reply = reply.replace(password, "[redacted]")
     # Allow only the standard account/database error shape, not arbitrary driver
     # output which could contain SQL, parameter values or authentication data.
-    if re.fullmatch(r"Access denied for user '[^'\r\n]*'@'[^'\r\n]*'(?: to database '[^'\r\n]*'| \(using password: (?:YES|NO)\))", reply):
+    if re.fullmatch(
+        r"Access denied for user '[^'\r\n]*'@'[^'\r\n]*'(?: to database '[^'\r\n]*'| \(using password: (?:YES|NO)\))",
+        reply,
+    ):
         return reply[:500]
     return None
 
@@ -87,50 +93,75 @@ def failure_details(exc, stage, job_id, log_error=True, password=None):
     if isinstance(exc, DatabaseOperationError):
         exc = exc.original
     code = None
-    reason = 'Lỗi chưa phân loại. Gửi giai đoạn và loại lỗi bên dưới để kiểm tra tiếp.'
+    reason = "Unclassified error. Use the stage and error type below for diagnosis."
     if isinstance(exc, DBAPIError):
         original = exc.orig
         code = database_error_code(original)
-        reason = DATABASE_ERRORS.get(code, 'Database từ chối thao tác hoặc kết nối bị lỗi. Kiểm tra log database và quyền tài khoản.')
+        reason = DATABASE_ERRORS.get(
+            code,
+            "The database rejected the operation or the connection failed. Check DB logs and account privileges.",
+        )
     elif isinstance(exc, OSError):
-        code = f'OS-{exc.errno}' if isinstance(exc.errno, int) else None
-        reason = {errno.ENOSPC: 'Máy chủ web hết dung lượng ổ đĩa tạm.',
-                  errno.EACCES: 'Máy chủ web không có quyền đọc/ghi file tạm hoặc chạy Java.',
-                  errno.ENOMEM: 'Máy chủ web không đủ bộ nhớ.'}.get(exc.errno, 'Không đọc/ghi được file hoặc không khởi chạy được Java.')
+        code = f"OS-{exc.errno}" if isinstance(exc.errno, int) else None
+        reason = {
+            errno.ENOSPC: "The web server is out of temporary disk space.",
+            errno.EACCES: "The web server cannot access temporary files or execute Java.",
+            errno.ENOMEM: "The web server is out of memory.",
+        }.get(exc.errno, "Cannot read/write a file or start Java.")
     elif isinstance(exc, csv.Error):
-        reason = 'Không đọc được CSV. Có thể một ô vượt giới hạn đọc CSV hoặc định dạng CSV không hợp lệ.'
+        reason = "Cannot read the CSV. A field may exceed the CSV reader limit or the CSV may be malformed."
     elif isinstance(exc, UnicodeError):
-        reason = 'Không giải mã được dữ liệu. Kiểm tra encoding XML/CSV.'
+        reason = "Cannot decode the data. Check the XML/CSV encoding."
     label = STAGES[stage]
     if operation:
-        label = {'server_connect': 'Kết nối máy chủ database (không chọn database đích)',
-                 'database_exists': f'Kiểm tra database [{database}] tồn tại',
-                 'drop_database': f'DROP DATABASE [{database}]',
-                 'create_database': f'CREATE DATABASE [{database}]',
-                 'target_connect': f'Mở database [{database}]'}[operation]
-    if code in ('1044', '42501') and operation:
-        reason = {'database_exists': 'Máy chủ từ chối truy vấn kiểm tra database tồn tại.',
-                  'drop_database': 'Tài khoản không có quyền DROP database này.',
-                  'create_database': 'Tài khoản không có quyền CREATE database này.',
-                  'target_connect': 'Tài khoản không có quyền truy cập database đích. Kiểm tra đúng tên database và tài khoản.',
-                  'server_connect': 'Máy chủ từ chối truy cập. Kiểm tra tài khoản được cấp quyền theo host kết nối.'}[operation]
-    if code == '1044' and operation:
-        reason = 'Máy chủ từ chối thao tác. Xem phản hồi gốc và dùng Chẩn đoán DB để đối chiếu tài khoản/server thực tế.'
+        label = {
+            "server_connect": "Connect to database server (without selecting the target)",
+            "database_exists": f"Check database [{database}] existence",
+            "drop_database": f"DROP DATABASE [{database}]",
+            "create_database": f"CREATE DATABASE [{database}]",
+            "target_connect": f"Open database [{database}]",
+        }[operation]
+    if code in ("1044", "42501") and operation:
+        reason = {
+            "database_exists": "The server rejected the database existence check.",
+            "drop_database": "This account cannot DROP this database.",
+            "create_database": "This account cannot CREATE this database.",
+            "target_connect": "This account cannot access the target database. Check the database name and account.",
+            "server_connect": "The server rejected access. Check the account selected for this client host.",
+        }[operation]
+    if code == "1044" and operation:
+        reason = "The server rejected the operation. Compare the original response and the actual account/server using DB diagnostics."
     server_reply = access_denied_reply(exc, password)
     if server_reply:
-        reason += f' DB trả về: {server_reply}.'
-    suffix = 'Database mới tạo có thể vẫn còn; kiểm tra trước khi thử lại.'
-    if state == 'dropped':
-        suffix = 'Lệnh DROP đã thành công, nhưng lệnh CREATE chưa được xác nhận thành công.'
-    elif state == 'created':
-        suffix = 'Database đã được tạo lại, nhưng ứng dụng chưa mở được database đích.'
-    elif operation in ('server_connect', 'database_exists') or (state == 'unchanged' and operation in ('drop_database', 'target_connect') and code in ('1044', '1045', '42501', '28P01')):
-        suffix = 'Ứng dụng chưa xóa/tạo lại database.'
+        reason += f" DB response: {server_reply}."
+    suffix = "A newly created database may remain; check it before retrying."
+    if state == "dropped":
+        suffix = "DROP succeeded, but CREATE was not confirmed successful."
+    elif state == "created":
+        suffix = "The database was recreated, but the application could not open it."
+    elif operation in ("server_connect", "database_exists") or (
+        state == "unchanged"
+        and operation in ("drop_database", "target_connect")
+        and code in ("1044", "1045", "42501", "28P01")
+    ):
+        suffix = "The application has not dropped or recreated the database."
     kind = type(exc).__name__
     # Never log str(exc), SQL, parameter values, credentials or XML contents.
     if log_error:
-        logger.error('job=%s stage=%s operation=%s exception=%s code=%s',
-                     job_id, stage, operation or 'none', kind, code or 'none')
-    identifier = f'{kind}, mã {code}' if code else kind
-    return {'stage': stage, 'operation': operation, 'server_reply': server_reply, 'error_code': code, 'error_type': kind,
-            'message': f'{label} thất bại ({identifier}). {reason} {suffix}'}
+        logger.error(
+            "job=%s stage=%s operation=%s exception=%s code=%s",
+            job_id,
+            stage,
+            operation or "none",
+            kind,
+            code or "none",
+        )
+    identifier = f"{kind}, code {code}" if code else kind
+    return {
+        "stage": stage,
+        "operation": operation,
+        "server_reply": server_reply,
+        "error_code": code,
+        "error_type": kind,
+        "message": f"{label} failed ({identifier}). {reason} {suffix}",
+    }

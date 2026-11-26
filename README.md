@@ -1,5 +1,11 @@
 # NetAct XML → Database
 
+**[English documentation / README_EN](README_EN.md)** · [Audit](AUDIT.md)
+
+Giao diện và thông báo của ứng dụng hiện dùng tiếng Anh. Trong Database browser có thêm tab SQL workspace
+để mở/chạy SQL script nhiều câu lệnh và export từng result set. CSV lấy từ snapshot của lần chạy, không chạy lại SQL.
+Xem README_EN để biết chi tiết transaction, TTL kết quả và giới hạn triển khai.
+
 Ứng dụng web tiếng Việt gộp hai bước **Nokia RAML20 XML → CSV → database**.
 Dùng nguyên file `boda-nokiacmdataparser.jar` do người dùng cung cấp; phần nhập database
 được viết lại từ quy trình trong script Python tham khảo. Không sao chép tài khoản hoặc mật khẩu cũ.

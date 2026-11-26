@@ -3,7 +3,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends default-jre-hea
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip==26.3 \
+    && pip install --no-cache-dir -r requirements.txt
 COPY --chown=10001:10001 app ./app
 COPY --chown=10001:10001 vendor ./vendor
 RUN useradd --create-home --uid 10001 netact

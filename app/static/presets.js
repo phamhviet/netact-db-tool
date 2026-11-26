@@ -2,7 +2,7 @@
   let profiles = {}, loadError = '';
   const ready = fetch('/api/db-presets').then(async response => {
     const data = await response.json();
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Không đọc được .env');
+    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Cannot read .env settings');
     profiles = data;
   }).catch(error => {loadError = error.message;});
   const field = (prefix, name) => document.getElementById(prefix + name);
@@ -19,9 +19,9 @@
     const bound = matches(prefix, profile);
     if (!configured || !bound) checkbox.checked = false;
     checkbox.disabled = !configured || !bound || field(prefix, 'host').disabled;
-    field(prefix, 'saved-password-hint').textContent = loadError || (!configured ? 'Chưa có mật khẩu trong .env'
-      : !bound ? 'Kết nối đã đổi — nhập mật khẩu riêng' : 'Mật khẩu được dùng ở server, không gửi xuống trình duyệt');
-    field(prefix, 'password').placeholder = checkbox.checked ? 'Đang dùng mật khẩu từ .env' : 'Mật khẩu database';
+    field(prefix, 'saved-password-hint').textContent = loadError || (!configured ? 'No password configured in .env'
+      : !bound ? 'Connection changed — enter a password' : 'The server uses the password without sending it to the browser');
+    field(prefix, 'password').placeholder = checkbox.checked ? 'Using the server .env password' : 'Database password';
   }
   async function apply(prefix = '', initial = false) {
     const kind = field(prefix, 'db_type').value;

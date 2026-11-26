@@ -7,16 +7,11 @@ function config() {
     database: $('database').value.trim(), username: $('username').value.trim(), password: $('password').value,
     create_database: $('create_database').checked, use_saved_credentials: $('use_saved_credentials').checked, ssl_mode: $('ssl_mode').value};
 }
-async function request(url, options) {
-  const response = await fetch(url, options);
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Cấu hình không hợp lệ. Vui lòng kiểm tra lại.');
-  return data;
-}
+const request = window.NetActUI.request;
 function setBusy(value) {
   busy = value;
   $('submit').setAttribute('aria-busy', String(value));
-  $('submit').firstChild.textContent = value ? 'Đang xử lý… ' : 'Chuyển đổi & nhập ';
+  $('submit').firstChild.textContent = value ? 'Processing… ' : 'Convert & import ';
   for (const control of form.querySelectorAll('input,select,button')) control.disabled = value;
   if (!value) {
     $('tls-require').disabled = $('db_type').value !== 'postgres';
@@ -25,18 +20,18 @@ function setBusy(value) {
 }
 function updateSummary() {
   const file = $('xml-file').files[0];
-  $('summary-file').textContent = file ? file.name : 'Chưa chọn file';
+  $('summary-file').textContent = file ? file.name : 'No file selected';
   const engine = $('db_type').selectedOptions[0].textContent;
-  $('summary-db').textContent = `${engine} · ${$('database').value.trim() || 'Chưa nhập tên'}`;
-  $('summary-mode').textContent = $('create_database').checked ? 'Tạo mới; tồn tại thì xóa và tạo lại' : 'Dùng database hiện có — không DROP/CREATE';
-  $('summary-host').textContent = $('host').value.trim() ? `${$('host').value.trim()}:${$('port').value}` : 'Chưa cấu hình';
+  $('summary-db').textContent = `${engine} · ${$('database').value.trim() || 'No name entered'}`;
+  $('summary-mode').textContent = $('create_database').checked ? 'Create new; replace if it exists' : 'Use existing database — no DROP/CREATE';
+  $('summary-host').textContent = $('host').value.trim() ? `${$('host').value.trim()}:${$('port').value}` : 'Not configured';
 }
 for (const id of ['db_type', 'database', 'host', 'port', 'create_database']) $(id).addEventListener('input', updateSummary);
 function showFile() {
   const file = $('xml-file').files[0];
   updateSummary();
-  $('filename').textContent = file ? file.name : 'Kéo thả hoặc chọn file XML';
-  $('filedetail').textContent = file ? `${(file.size / 1024 ** 2).toFixed(2)} MB · sẵn sàng chuyển đổi` : 'Nhấn để duyệt file trên máy tính';
+  $('filename').textContent = file ? file.name : 'Drop an XML file or browse';
+  $('filedetail').textContent = file ? `${(file.size / 1024 ** 2).toFixed(2)} MB · ready to convert` : 'Click to select a file from your computer';
 }
 $('xml-file').addEventListener('change', showFile);
 const zone = $('dropzone');
@@ -60,7 +55,7 @@ $('test-connection').addEventListener('click', async () => {
   for (const id of ['database','host','port','username']) if (!$(id).reportValidity()) return;
   $('test-connection').disabled = true;
   $('connection-result').className = '';
-  $('connection-result').textContent = 'Đang kiểm tra…';
+  $('connection-result').textContent = 'Testing connection…';
   try {
     const data = await request('/api/connection', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config())});
     $('connection-result').textContent = data.message;
@@ -74,7 +69,7 @@ $('diagnose-db').addEventListener('click', async () => {
   for (const id of ['database','host','port','username']) if (!$(id).reportValidity()) return;
   $('diagnose-db').disabled = true;
   $('db-diagnostics').hidden = false;
-  $('db-diagnostics').textContent = 'Đang đọc thông tin server và tài khoản. Không chạy DROP/CREATE.';
+  $('db-diagnostics').textContent = 'Reading server and account details. No DROP/CREATE is executed.';
   try {
     const data = await request('/api/diagnostics', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config())});
     $('db-diagnostics').textContent = JSON.stringify(data, null, 2);
@@ -82,26 +77,26 @@ $('diagnose-db').addEventListener('click', async () => {
   finally {if (!busy) $('diagnose-db').disabled = false;}
 });
 function render(job) {
-  $('status-title').textContent = {queued:'Đã nhận dữ liệu',running:'Đang xử lý…',completed:'Nhập dữ liệu thành công',completed_with_errors:'Hoàn tất có lỗi',failed:'Tác vụ thất bại'}[job.status];
+  $('status-title').textContent = {queued:'File received',running:'Processing…',completed:'Import completed',completed_with_errors:'Completed with errors',failed:'Import failed'}[job.status];
   $('status-message').textContent = job.message;
   $('job-mode').hidden = typeof job.create_database !== 'boolean';
-  $('job-mode').textContent = job.create_database ? 'Chế độ đã gửi: tạo mới / xóa và tạo lại nếu đã tồn tại' : 'Chế độ đã gửi: dùng database hiện có, không DROP/CREATE';
+  $('job-mode').textContent = job.create_database ? 'Submitted mode: create new / replace an existing database' : 'Submitted mode: use existing database, no DROP/CREATE';
   $('status-message').className = ['failed','completed_with_errors'].includes(job.status) ? 'error' : '';
   $('progress').value = job.progress; $('percent').textContent = `${job.progress}%`;
   if (['completed','completed_with_errors'].includes(job.status)) {
     $('results').hidden = false;
-    $('totals').textContent = `${job.tables.length} file CSV · ${job.total_rows.toLocaleString('vi-VN')} dòng đã lưu · ${job.failed_rows || 0} dòng lỗi · ${job.failed_tables || 0} bảng lỗi`;
+    $('totals').textContent = `${job.tables.length} CSV files · ${job.total_rows.toLocaleString('en-US')} rows saved · ${job.failed_rows || 0} failed rows · ${job.failed_tables || 0} failed tables`;
     $('result-rows').replaceChildren();
     $('import-errors').replaceChildren();
     for (const table of job.tables) {
       const row = document.createElement('tr');
-      for (const value of [table.table, table.rows.toLocaleString('vi-VN'), table.columns.length, table.rows_failed || 0, {imported:'Đã nhập',partial:'Có dòng lỗi',failed_create:'Lỗi tạo bảng',skipped_empty:'File rỗng, bỏ qua'}[table.status] || 'Đã nhập']) {
+      for (const value of [table.table, table.rows.toLocaleString('en-US'), table.columns.length, table.rows_failed || 0, {imported:'Imported',partial:'Some rows failed',failed_create:'Table creation failed',skipped_empty:'Empty file, skipped'}[table.status] || 'Imported']) {
         const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell);
       }
       $('result-rows').appendChild(row);
       for (const error of table.errors || []) {
         const detail = document.createElement('p');
-        detail.textContent = `${table.file || table.table}${error.line ? ` · dòng CSV ${error.line}` : ''}: ${error.message}`;
+        detail.textContent = `${table.file || table.table}${error.line ? ` · CSV line ${error.line}` : ''}: ${error.message}`;
         $('import-errors').appendChild(detail);
       }
     }
@@ -114,8 +109,8 @@ async function poll(id) {
     try {job = await request(`/api/jobs/${encodeURIComponent(id)}`); failures = 0;}
     catch (error) {
       failures++;
-      $('status-message').textContent = 'Mất kết nối theo dõi. Đang thử lại; tác vụ có thể vẫn chạy trên máy chủ.';
-      if (failures >= 10) throw new Error('Không lấy được trạng thái. Tác vụ có thể vẫn chạy; tải lại trang để tiếp tục theo dõi.');
+      $('status-message').textContent = 'Lost the status connection. Retrying; the import may still be running on the server.';
+      if (failures >= 10) throw new Error('Cannot retrieve status. The import may still be running; reload to reconnect.');
       await sleep(3000); continue;
     }
     render(job);
@@ -129,12 +124,12 @@ form.addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return;
   const file = $('xml-file').files[0];
   if (!file || !file.name.toLowerCase().endsWith('.xml') || !file.size) {
-    $('status-message').textContent = 'Vui lòng chọn file .xml không rỗng.';
+    $('status-message').textContent = 'Choose a non-empty .xml file.';
     $('status-message').className = 'error'; return;
   }
   const body = new FormData(); body.append('config',JSON.stringify(config())); body.append('file',file);
   setBusy(true); $('results').hidden = true;
-  $('status-title').textContent = 'Đang tải XML lên…'; $('status-message').textContent = 'Vui lòng chờ tải file hoàn tất.';
+  $('status-title').textContent = 'Uploading XML…'; $('status-message').textContent = 'Wait for the upload to finish.';
   $('status-message').className = ''; $('progress').value = 0; $('percent').textContent = '0%';
   try {
     const job = await request('/api/jobs',{method:'POST',body});
@@ -148,8 +143,8 @@ updateSummary();
 (async () => {
   try {
     const health = await request('/api/health');
-    $('upload-limit').textContent = '.XML · RAML20 · không giới hạn dung lượng';
-    if (!health.java) {$('status-message').textContent = 'Máy chủ chưa có Java. Cần cài Java trước khi chuyển đổi.'; $('status-message').className = 'error';}
+    $('upload-limit').textContent = '.XML · RAML20 · no upload size limit';
+    if (!health.java) {$('status-message').textContent = 'Java is not installed on the server. Install it before converting.'; $('status-message').className = 'error';}
     const job = sessionStorage.getItem('netact-job');
     if (job) {setBusy(true); try {await poll(job);} finally {setBusy(false);}}
   } catch (error) {$('status-message').textContent = error.message;}
