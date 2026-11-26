@@ -13,6 +13,8 @@
     button.addEventListener('click', () => {
       const browse = button.dataset.view === 'browser';
       el('workspace-label').textContent = browse ? 'DATA TOOLS / Duyệt database' : 'DATA TOOLS / XML Import';
+      el('workspace-badge').textContent = browse ? 'DATABASE VIEWER' : 'NOKIA RAML20';
+      document.querySelectorAll('[data-view]').forEach(node => node.setAttribute('aria-pressed', String(node === button)));
       el('browser-view').hidden = !browse; el('import-view').hidden = browse;
       document.querySelectorAll('[data-view]').forEach(node => node.classList.toggle('active', node === button));
     });

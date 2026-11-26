@@ -16,6 +16,8 @@ async function request(url, options) {
 }
 function setBusy(value) {
   busy = value;
+  $('submit').setAttribute('aria-busy', String(value));
+  $('submit').firstChild.textContent = value ? 'Đang xử lý… ' : 'Chuyển đổi & nhập ';
   for (const control of form.querySelectorAll('input,select,button')) control.disabled = value;
   if (!value) {
     $('tls-require').disabled = $('db_type').value !== 'postgres';
@@ -32,10 +34,19 @@ function resetChoice() {
   $('confirm_database').setCustomValidity(match ? '' : 'Nhập đúng tên database để xác nhận xóa.');
 }
 for (const id of ['reset_database','confirm_database','database']) $(id).addEventListener('input', resetChoice);
+function updateSummary() {
+  const file = $('xml-file').files[0];
+  $('summary-file').textContent = file ? file.name : 'Chưa chọn file';
+  const engine = $('db_type').selectedOptions[0].textContent;
+  $('summary-db').textContent = `${engine} · ${$('database').value.trim() || 'Chưa nhập tên'}`;
+  $('summary-host').textContent = $('host').value.trim() ? `${$('host').value.trim()}:${$('port').value}` : 'Chưa cấu hình';
+}
+for (const id of ['db_type', 'database', 'host', 'port']) $(id).addEventListener('input', updateSummary);
 function showFile() {
   const file = $('xml-file').files[0];
-  $('filename').textContent = file ? file.name : 'Kéo thả file XML vào đây';
-  $('filedetail').textContent = file ? `${(file.size / 1024 ** 2).toFixed(2)} MB · sẵn sàng chuyển đổi` : 'hoặc nhấn để chọn file từ máy tính';
+  updateSummary();
+  $('filename').textContent = file ? file.name : 'Kéo thả hoặc chọn file XML';
+  $('filedetail').textContent = file ? `${(file.size / 1024 ** 2).toFixed(2)} MB · sẵn sàng chuyển đổi` : 'Nhấn để duyệt file trên máy tính';
 }
 $('xml-file').addEventListener('change', showFile);
 const zone = $('dropzone');
@@ -52,6 +63,7 @@ $('db_type').addEventListener('change', () => {
   $('tls-require').disabled = $('db_type').value !== 'postgres';
   if ($('tls-require').disabled && $('ssl_mode').value === 'require') $('ssl_mode').value = 'disable';
   $('connection-result').textContent = '';
+  updateSummary();
 });
 form.addEventListener('input', () => {$('connection-result').textContent = '';});
 $('test-connection').addEventListener('click', async () => {
@@ -128,6 +140,7 @@ form.addEventListener('submit', async event => {
   } catch (error) {$('status-message').textContent = error.message; $('status-message').className = 'error';}
   finally {setBusy(false);}
 });
+updateSummary();
 (async () => {
   try {
     const health = await request('/api/health');
