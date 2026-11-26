@@ -42,9 +42,9 @@ Mở trình duyệt tại `http://localhost:8000`. Chọn XML từ máy tính, n
 host, port, database, username, password và TLS. Nhấn **Kiểm tra kết nối**, sau đó
 **Chuyển đổi & nhập**. Xem tiến độ và số bảng/dòng đã lưu.
 
-- **Database đã có:** bỏ chọn “Tạo database mới”; tài khoản cần quyền CONNECT, CREATE TABLE, INSERT và DROP (để dọn khi lỗi).
-- **Database mới:** chọn “Tạo database mới”; cần quyền CREATE DATABASE. PostgreSQL dùng database `postgres` để kết nối quản trị;
-  MariaDB/MySQL dùng `information_schema`. Database đã tồn tại sẽ làm bước tạo thất bại.
+- **Database đã có:** bỏ chọn “Tạo database mới”; tài khoản cần quyền CONNECT, CREATE TABLE và INSERT.
+- **Database mới:** chọn “Tạo database mới”; chạy DROP DATABASE IF EXISTS rồi CREATE cùng tên, cần quyền DROP/CREATE DATABASE. PostgreSQL dùng database `postgres` để kết nối quản trị;
+  MariaDB/MySQL dùng `information_schema`. **Nếu database đã tồn tại, toàn bộ dữ liệu trong đó sẽ bị xóa.**
 - Tên database: chữ Latin, số, `_`, tối đa 63 ký tự, không bắt đầu bằng số.
 - Host là địa chỉ **máy chủ web** truy cập được; không phải địa chỉ tương đối với máy đang mở trình duyệt.
 - PostgreSQL mặc định 5432; MariaDB/MySQL 3306. Có thể sửa port.
@@ -120,10 +120,9 @@ Log máy chủ chỉ ghi mã tác vụ, giai đoạn, loại exception và mã l
   để lỗi một dòng không làm hỏng toàn bộ transaction. Commit sau khi duyệt các file CSV.
 - Kết quả hiển thị số dòng thành công, dòng lỗi, bảng lỗi và tối đa 20 chi tiết lỗi mỗi file,
   không chứa giá trị dữ liệu/SQL/mật khẩu. Nếu có lỗi, trạng thái là **Hoàn tất có lỗi**, không báo thành công toàn bộ.
-- Để thực hiện đúng bước `DROP DATABASE IF EXISTS` rồi `CREATE DATABASE` của script gốc,
-  chọn **Xóa và tạo lại database như script gốc** và nhập lại đúng tên database để xác nhận.
-  **Bước này xóa toàn bộ bảng/dữ liệu của database đích.** Tài khoản cần quyền DROP/CREATE DATABASE.
-  Mặc định không tự xóa database; nếu không chọn xóa hoặc tạo mới thì dùng database đang có.
+- Chỉ có một tùy chọn **Tạo database mới**: bật thì chạy `DROP DATABASE IF EXISTS` rồi `CREATE DATABASE`
+  cùng tên; tắt thì dùng database hiện có và giữ dữ liệu. Không có ô reset/xác nhận tên riêng.
+  **Khi bật, toàn bộ bảng/dữ liệu của database trùng tên sẽ bị xóa.** Tài khoản cần quyền DROP/CREATE DATABASE.
   Kiểm tra kết nối và duyệt database không bao giờ thực hiện DROP/CREATE.
 - Lỗi đọc file/CSV, commit, mất kết nối hoặc tiến trình bị dừng có thể làm tác vụ dừng và còn dữ liệu nhập dở,
   như khi script bị gián đoạn. Không chạy đồng thời tác vụ khác sửa cùng database trong lúc import.
@@ -176,7 +175,7 @@ docker rm -f netact-test-pg netact-test-maria
 
 Kiểm thử chạy JAR thật, upload API, tạo DB tạm, đọc lại giá trị tiếng Việt/ID `001`,
 kiểm tra tái sử dụng bảng, kiểu VARCHAR/TEXT, dòng thiếu/thừa/trắng, encoding, bảng 400 cột,
-lỗi tạo bảng/insert vẫn tiếp tục, tên file cắt trùng và xác nhận xóa/tạo lại database kiểm thử. Kiểm thử database còn xác minh danh sách bảng,
+lỗi tạo bảng/insert vẫn tiếp tục, tên file cắt trùng và tạo mới/xóa-tạo-lại database kiểm thử. Kiểm thử database còn xác minh danh sách bảng,
 phân trang, tên bảng có dấu ngoặc kép, NULL và export 1.205 dòng qua nhiều lô, giữ nguyên giá trị CSV. Chỉ DB tên ngẫu nhiên do test tạo mới bị xóa.
 Chưa có XML thực tế của người dùng để xác nhận các class/list đặc thù hoặc hiệu năng file lớn.
 

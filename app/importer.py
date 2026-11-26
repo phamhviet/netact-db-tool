@@ -37,14 +37,13 @@ def engine_for(config, database=None):
 
 
 def prepare_database(config):
-    if config.create_database or config.reset_database:
+    if config.create_database:
         admin = engine_for(config, 'postgres' if config.db_type == 'postgres' else 'information_schema')
         try:
             with admin.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
                 name = admin.dialect.identifier_preparer.quote_identifier(config.database)
                 suffix = ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci' if config.db_type != 'postgres' else ''
-                if config.reset_database:
-                    conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
+                conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
                 conn.exec_driver_sql(f'CREATE DATABASE {name}{suffix}')
         finally:
             admin.dispose()

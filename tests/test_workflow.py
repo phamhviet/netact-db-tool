@@ -282,13 +282,15 @@ def test_real_database_workflow(db_type, port, user, tmp_path):
         with target.connect() as conn:
             assert conn.exec_driver_sql(f'SELECT COUNT(*) FROM {q(table)}').scalar() == 4
         verify_original_script_cases(target, tmp_path, db_type)
-        # Only this test's randomly named DB is dropped/recreated.
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            ConnectionConfig(**{**config, 'reset_database': True, 'confirm_database': 'wrong'})
+        # Creating a database now means DROP IF EXISTS + CREATE with the same name.
+        # Leaving the option off, or testing a connection, must preserve existing data.
+        assert client.post('/api/connection', json=config).json()['ok']
+        assert inspect(target).get_table_names()
+        reused = prepare_database(ConnectionConfig(**{**config, 'create_database': False}))
+        assert inspect(reused).get_table_names()
+        reused.dispose()
         target.dispose()
-        recreated = prepare_database(ConnectionConfig(**{**config, 'reset_database': True,
-                                                        'confirm_database': config['database']}))
+        recreated = prepare_database(ConnectionConfig(**config))
         with recreated.connect() as conn:
             assert inspect(conn).get_table_names() == []
         recreated.dispose()

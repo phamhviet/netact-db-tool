@@ -78,10 +78,6 @@ input:disabled, select:disabled { background: #f3f6f8; color: var(--muted); opac
 .options .check { align-self: center; padding-top: 18px; }
 .check input { width: 17px; height: 17px; margin: 0; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
 .check small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 3px; line-height: 1.5; }
-.reset-option { margin-top: 20px; border: 1px solid #e1e7ec; border-radius: 8px; padding: 13px 14px; background: #fafbfc; }
-.reset-option:has(input:checked) { border-color: #e7bca8; background: #fff8f3; }
-.reset-option:has(input:checked) .check { color: #9c4532; }
-.reset-option > label + label { margin-top: 15px; }
 .connection-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
 #connection-result, #browse-connection { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; flex: 1; min-width: 140px; }
 .button { display: inline-flex; gap: 12px; align-items: center; justify-content: center; min-height: 42px; padding: 10px 15px; border: 1px solid transparent; border-radius: 7px; font-size: 13px; font-weight: 600; transition: background .15s, box-shadow .15s; }

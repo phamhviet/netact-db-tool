@@ -96,7 +96,7 @@ def health():
 @app.post('/api/connection')
 def test_connection(config: ConnectionConfig):
     # Read-only: never create a database from the connection-test button.
-    engine = engine_for(config, ('postgres' if config.db_type == 'postgres' else 'information_schema') if config.create_database or config.reset_database else None)
+    engine = engine_for(config, ('postgres' if config.db_type == 'postgres' else 'information_schema') if config.create_database else None)
     try:
         with engine.connect() as conn:
             conn.execute(text('SELECT 1')).scalar_one()

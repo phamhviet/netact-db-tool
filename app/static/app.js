@@ -5,8 +5,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function config() {
   return {db_type: $('db_type').value, host: $('host').value.trim(), port: Number($('port').value),
     database: $('database').value.trim(), username: $('username').value.trim(), password: $('password').value,
-    create_database: $('create_database').checked, reset_database: $('reset_database').checked,
-    confirm_database: $('confirm_database').value, ssl_mode: $('ssl_mode').value};
+    create_database: $('create_database').checked, ssl_mode: $('ssl_mode').value};
 }
 async function request(url, options) {
   const response = await fetch(url, options);
@@ -21,19 +20,8 @@ function setBusy(value) {
   for (const control of form.querySelectorAll('input,select,button')) control.disabled = value;
   if (!value) {
     $('tls-require').disabled = $('db_type').value !== 'postgres';
-    $('create_database').disabled = $('reset_database').checked;
   }
 }
-function resetChoice() {
-  const enabled = $('reset_database').checked;
-  $('reset-confirm-label').hidden = !enabled;
-  $('confirm_database').required = enabled;
-  $('create_database').disabled = enabled;
-  if (enabled) $('create_database').checked = false;
-  const match = !enabled || $('confirm_database').value === $('database').value;
-  $('confirm_database').setCustomValidity(match ? '' : 'Nhập đúng tên database để xác nhận xóa.');
-}
-for (const id of ['reset_database','confirm_database','database']) $(id).addEventListener('input', resetChoice);
 function updateSummary() {
   const file = $('xml-file').files[0];
   $('summary-file').textContent = file ? file.name : 'Chưa chọn file';
