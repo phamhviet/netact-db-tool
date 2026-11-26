@@ -158,7 +158,17 @@ giống `mariadb.connect(user=..., password=..., host=..., port=...)` trong scri
 Nút **Kiểm tra kết nối** chỉ chạy SELECT và hiển thị tài khoản đã xác thực từ `CURRENT_USER()` (`user@host`),
 không thực hiện DROP/CREATE. Kết nối thành công không đồng nghĩa đã có quyền xóa/tạo database.
 
-Nếu lỗi `1044`, xem lệnh bị từ chối và tài khoản DB thực tế:
+Nếu lỗi `1044`, nhấn **Chẩn đoán DB** ở form kết nối (không cần upload XML):
+- Chỉ chạy SELECT/SHOW; không chạy DROP/CREATE, không tạo database thử.
+- Hiển thị host/port đang dùng, CURRENT_USER, USER/session_user, hostname/port/version của server,
+  database nhìn thấy và chế độ tạo mới/tái sử dụng đang chọn. MariaDB/MySQL có CURRENT_ROLE và
+  phần GRANT theo phạm vi; toàn bộ đoạn tài khoản/authentication/hash sau TO được loại bỏ.
+- Lỗi Access denied tiêu chuẩn giữ phản hồi gốc của DB về tài khoản/database, không đưa câu SQL,
+  giá trị tham số hoặc mật khẩu vào kết quả. Không tự kết luận tài khoản root thiếu quyền chỉ từ mã lỗi.
+- Khi bỏ chọn **Tạo database mới**, import không gửi bất kỳ lệnh DROP DATABASE/CREATE DATABASE nào.
+  Khi bật, lệnh CREATE không thêm CHARACTER SET/COLLATE để khớp script gốc; DB dùng mặc định của server.
+
+Đối chiếu lệnh bị server từ chối:
 - `DROP DATABASE`: tài khoản cần quyền DROP trên đúng database.
 - `CREATE DATABASE`: tài khoản cần quyền CREATE trên đúng database.
 - `Mở database`: kiểm tra tên database và quyền truy cập.

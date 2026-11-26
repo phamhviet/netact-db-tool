@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.diagnostics import diagnose_connection
 from app.errors import failure_details, DatabaseOperationError
 from app.settings import public_database_profiles
 from app.config import ConnectionConfig
@@ -62,7 +63,7 @@ def run_job(job_id, config, folder):
     except ImportFailure as exc:
         update(job_id, status='failed', stage=stage, message=str(exc))
     except Exception as exc:
-        update(job_id, status='failed', **failure_details(exc, stage, job_id))
+        update(job_id, status='failed', **failure_details(exc, stage, job_id, password=config.password.get_secret_value()))
     finally:
         if engine is not None:
             engine.dispose()
@@ -119,10 +120,20 @@ def test_connection(config: ConnectionConfig):
                 'message': f'Kết nối thành công. Tài khoản DB thực tế: {identity}. Chưa thực hiện DROP/CREATE.'}
     except Exception as exc:
         operation = 'server_connect' if config.create_database else 'target_connect'
-        details = failure_details(DatabaseOperationError(operation, exc, config.database), 'database_connect', 'connection-test')
+        details = failure_details(DatabaseOperationError(operation, exc, config.database), 'database_connect', 'connection-test', password=config.password.get_secret_value())
         raise HTTPException(400, details['message']) from None
     finally:
         engine.dispose()
+
+
+@app.post('/api/diagnostics')
+def database_diagnostics(config: ConnectionConfig):
+    try:
+        return JSONResponse(diagnose_connection(config), headers={'Cache-Control': 'no-store'})
+    except Exception as exc:
+        details = failure_details(DatabaseOperationError('server_connect', exc, config.database),
+                                  'database_connect', 'diagnostics', password=config.password.get_secret_value())
+        raise HTTPException(400, details['message']) from None
 
 
 @app.post('/api/jobs', status_code=202)
@@ -154,7 +165,7 @@ async def create_job(config: str = Form(...), file: UploadFile = File(...)):
                     del jobs[old]
             if len(jobs) >= 100:
                 del jobs[next(iter(jobs))]
-            jobs[job_id] = {'id': job_id, 'status': 'queued', 'progress': 0, 'message': 'Đã nhận XML.', 'tables': []}
+            jobs[job_id] = {'id': job_id, 'status': 'queued', 'progress': 0, 'message': 'Đã nhận XML.', 'create_database': settings.create_database, 'tables': []}
         executor.submit(run_job, job_id, settings, folder)
         submitted = True
         return {'id': job_id}

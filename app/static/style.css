@@ -141,3 +141,5 @@ footer { display: flex; justify-content: space-between; gap: 16px; padding: 10px
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
 
 .saved-credentials{grid-column:1 / -1!important;padding-top:0!important}
+
+.diagnostics{white-space:pre-wrap;overflow-wrap:anywhere;max-height:400px;overflow:auto;padding:16px;background:#f4f7fa;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.7;color:var(--ink)}

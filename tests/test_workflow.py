@@ -219,6 +219,13 @@ def test_real_database_workflow(db_type, port, user, tmp_path, monkeypatch):
     admin = engine_for(parsed, 'postgres' if db_type == 'postgres' else 'information_schema')
     target = None
     try:
+        diagnostics = client.post('/api/diagnostics', json=api_config)
+        assert diagnostics.status_code == 200, diagnostics.text
+        assert diagnostics.json()['read_only'] is True
+        assert diagnostics.json()['connection']['create_database'] is True
+        assert diagnostics.json()['connection']['password_source'] == 'env'
+        assert 'local-test-only' not in diagnostics.text
+        assert 'IDENTIFIED' not in diagnostics.text
         assert client.post('/api/connection', json=api_config).json()['ok']
         with FIXTURE.open('rb') as upload:
             response = client.post('/api/jobs', data={'config': json.dumps(api_config)}, files={'file': ('sample.xml', upload, 'application/xml')})
@@ -288,6 +295,34 @@ def test_real_database_workflow(db_type, port, user, tmp_path, monkeypatch):
         assert repeated[0]['rows'] == 2
         with target.connect() as conn:
             assert conn.exec_driver_sql(f'SELECT COUNT(*) FROM {q(table)}').scalar() == 4
+        # Exercise a whole upload/import with the option OFF and trace database DDL.
+        from sqlalchemy import event
+        from sqlalchemy.engine import Engine
+        database_ddl = []
+
+        def watch_database_ddl(conn, cursor, statement, parameters, context, executemany):
+            if statement.startswith(('DROP DATABASE', 'CREATE DATABASE')):
+                database_ddl.append(statement.split()[0])
+
+        event.listen(Engine, 'before_cursor_execute', watch_database_ddl)
+        try:
+            with FIXTURE.open('rb') as source:
+                response = client.post('/api/jobs', data={'config': json.dumps({**api_config, 'create_database': False})},
+                                       files={'file': ('sample.xml', source, 'application/xml')})
+            assert response.status_code == 202
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                reused_job = client.get('/api/jobs/' + response.json()['id']).json()
+                if reused_job['status'] in ('failed', 'completed', 'completed_with_errors'):
+                    break
+                time.sleep(.05)
+            assert reused_job['status'] == 'completed', reused_job
+            assert reused_job['create_database'] is False
+            assert database_ddl == []
+            with target.connect() as conn:
+                assert conn.exec_driver_sql(f'SELECT COUNT(*) FROM {q(table)}').scalar() == 6
+        finally:
+            event.remove(Engine, 'before_cursor_execute', watch_database_ddl)
         verify_original_script_cases(target, tmp_path, db_type)
         # Creating a database now means DROP IF EXISTS + CREATE with the same name.
         # Leaving the option off, or testing a connection, must preserve existing data.
@@ -438,7 +473,7 @@ def test_mariadb_schema_scoped_permissions(tmp_path):
         details = failure_details(caught.value, 'database_connect', 'test', log_error=False)
         assert details['operation'] == 'drop_database'
         assert details['error_code'] == '1044'
-        assert 'quyền DROP' in details['message']
+        assert 'Máy chủ từ chối' in details['message']
         assert password not in json.dumps(details)
         with owned.connect() as conn:
             assert conn.exec_driver_sql('SELECT value FROM sentinel').scalar_one() == 'preserved'
@@ -530,3 +565,27 @@ def test_missing_database_creates_without_attempting_drop(monkeypatch):
             conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
             conn.exec_driver_sql("DROP USER IF EXISTS %s@'%%'", (account,))
         root.dispose()
+
+
+def test_grant_diagnostics_remove_authentication_data():
+    from app.diagnostics import grant_scopes
+    scopes = grant_scopes([
+        "GRANT ALL PRIVILEGES ON *.* TO `root`@`%` IDENTIFIED BY PASSWORD '*PRIVATE_HASH' WITH GRANT OPTION",
+        "GRANT SELECT ON `app`.* TO 'test'@'%' IDENTIFIED VIA mysql_native_password USING '*OTHER_HASH'",
+        "GRANT `admin_role` TO 'test'@'%'",
+    ])
+    assert scopes == ['GRANT ALL PRIVILEGES ON *.*', 'GRANT SELECT ON `app`.*']
+    assert 'HASH' not in json.dumps(scopes)
+
+
+def test_access_denied_keeps_standard_server_reply_but_not_sql_or_password():
+    from sqlalchemy.exc import OperationalError
+    from pymysql.err import OperationalError as MySQLError
+    from app.errors import DatabaseOperationError, failure_details
+    original = OperationalError('PRIVATE_SQL', {'password': 'PRIVATE_PASSWORD'},
+                                MySQLError(1044, "Access denied for user 'root'@'%' to database 'NAQ092N'"))
+    report = failure_details(DatabaseOperationError('create_database', original, 'NAQ092N'),
+                             'database_connect', 'test', log_error=False, password='PRIVATE_PASSWORD')
+    assert report['server_reply'] == "Access denied for user 'root'@'%' to database 'NAQ092N'"
+    assert 'PRIVATE_' not in json.dumps(report)
+    assert 'Tài khoản không có quyền CREATE' not in report['message']

@@ -64,14 +64,13 @@ def prepare_database(config):
         try:
             with admin.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
                 name = admin.dialect.identifier_preparer.quote_identifier(config.database)
-                suffix = ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci' if config.db_type != 'postgres' else ''
                 operation = 'database_exists'
                 if database_exists(conn, config):
                     operation = 'drop_database'
                     conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
                     state = 'dropped'
                 operation = 'create_database'
-                conn.exec_driver_sql(f'CREATE DATABASE {name}{suffix}')
+                conn.exec_driver_sql(f'CREATE DATABASE {name}')
         except SQLAlchemyError as exc:
             raise DatabaseOperationError(operation, exc, config.database, state) from None
         finally:

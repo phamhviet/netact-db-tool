@@ -1,6 +1,7 @@
 import csv
 import errno
 import logging
+import re
 
 from sqlalchemy.exc import DBAPIError
 
@@ -9,7 +10,7 @@ STAGES = {'xml_to_csv': 'Chuyển XML sang CSV', 'database_connect': 'Kết nố
           'csv_to_database': 'Tạo bảng/nhập CSV'}
 DATABASE_ERRORS = {
     '1045': 'Sai tài khoản/mật khẩu hoặc tài khoản không được phép kết nối từ máy chủ web.',
-    '1044': 'Tài khoản không có quyền truy cập hoặc tạo database này.',
+    '1044': 'Máy chủ trả về Access denied đối với database. Cần đối chiếu tài khoản và phản hồi gốc của máy chủ.',
     '1049': 'Database chưa tồn tại. Tạo trước hoặc chọn Tạo database mới.',
     '1007': 'Database đã tồn tại hoặc đang được tạo bởi tác vụ khác. Kiểm tra tên đích và quyền DROP/CREATE.',
     '1142': 'Tài khoản thiếu quyền thực hiện thao tác trên bảng (CREATE/INSERT/SELECT/DROP).',
@@ -50,7 +51,22 @@ class DatabaseOperationError(Exception):
         self.state = state
 
 
-def failure_details(exc, stage, job_id, log_error=True):
+def access_denied_reply(exc, password):
+    if not isinstance(exc, DBAPIError) or not exc.orig.args or exc.orig.args[0] not in (1044, 1045):
+        return None
+    if len(exc.orig.args) < 2 or not isinstance(exc.orig.args[1], str):
+        return None
+    reply = exc.orig.args[1]
+    if password:
+        reply = reply.replace(password, '[redacted]')
+    # Allow only the standard account/database error shape, not arbitrary driver
+    # output which could contain SQL, parameter values or authentication data.
+    if re.fullmatch(r"Access denied for user '[^'\r\n]*'@'[^'\r\n]*'(?: to database '[^'\r\n]*'| \(using password: (?:YES|NO)\))", reply):
+        return reply[:500]
+    return None
+
+
+def failure_details(exc, stage, job_id, log_error=True, password=None):
     operation = exc.operation if isinstance(exc, DatabaseOperationError) else None
     database = exc.database if isinstance(exc, DatabaseOperationError) else None
     state = exc.state if isinstance(exc, DatabaseOperationError) else None
@@ -88,6 +104,11 @@ def failure_details(exc, stage, job_id, log_error=True):
                   'create_database': 'Tài khoản không có quyền CREATE database này.',
                   'target_connect': 'Tài khoản không có quyền truy cập database đích. Kiểm tra đúng tên database và tài khoản.',
                   'server_connect': 'Máy chủ từ chối truy cập. Kiểm tra tài khoản được cấp quyền theo host kết nối.'}[operation]
+    if code == '1044' and operation:
+        reason = 'Máy chủ từ chối thao tác. Xem phản hồi gốc và dùng Chẩn đoán DB để đối chiếu tài khoản/server thực tế.'
+    server_reply = access_denied_reply(exc, password)
+    if server_reply:
+        reason += f' DB trả về: {server_reply}.'
     suffix = 'Database mới tạo có thể vẫn còn; kiểm tra trước khi thử lại.'
     if state == 'dropped':
         suffix = 'Lệnh DROP đã thành công, nhưng lệnh CREATE chưa được xác nhận thành công.'
@@ -101,5 +122,5 @@ def failure_details(exc, stage, job_id, log_error=True):
         logger.error('job=%s stage=%s operation=%s exception=%s code=%s',
                      job_id, stage, operation or 'none', kind, code or 'none')
     identifier = f'{kind}, mã {code}' if code else kind
-    return {'stage': stage, 'operation': operation, 'error_code': code, 'error_type': kind,
+    return {'stage': stage, 'operation': operation, 'server_reply': server_reply, 'error_code': code, 'error_type': kind,
             'message': f'{label} thất bại ({identifier}). {reason} {suffix}'}

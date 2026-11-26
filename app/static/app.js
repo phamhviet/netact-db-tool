@@ -28,9 +28,10 @@ function updateSummary() {
   $('summary-file').textContent = file ? file.name : 'Chưa chọn file';
   const engine = $('db_type').selectedOptions[0].textContent;
   $('summary-db').textContent = `${engine} · ${$('database').value.trim() || 'Chưa nhập tên'}`;
+  $('summary-mode').textContent = $('create_database').checked ? 'Tạo mới; tồn tại thì xóa và tạo lại' : 'Dùng database hiện có — không DROP/CREATE';
   $('summary-host').textContent = $('host').value.trim() ? `${$('host').value.trim()}:${$('port').value}` : 'Chưa cấu hình';
 }
-for (const id of ['db_type', 'database', 'host', 'port']) $(id).addEventListener('input', updateSummary);
+for (const id of ['db_type', 'database', 'host', 'port', 'create_database']) $(id).addEventListener('input', updateSummary);
 function showFile() {
   const file = $('xml-file').files[0];
   updateSummary();
@@ -69,9 +70,22 @@ $('test-connection').addEventListener('click', async () => {
     $('connection-result').className = 'error';
   } finally {if (!busy) $('test-connection').disabled = false;}
 });
+$('diagnose-db').addEventListener('click', async () => {
+  for (const id of ['database','host','port','username']) if (!$(id).reportValidity()) return;
+  $('diagnose-db').disabled = true;
+  $('db-diagnostics').hidden = false;
+  $('db-diagnostics').textContent = 'Đang đọc thông tin server và tài khoản. Không chạy DROP/CREATE.';
+  try {
+    const data = await request('/api/diagnostics', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config())});
+    $('db-diagnostics').textContent = JSON.stringify(data, null, 2);
+  } catch (error) {$('db-diagnostics').textContent = error.message;}
+  finally {if (!busy) $('diagnose-db').disabled = false;}
+});
 function render(job) {
   $('status-title').textContent = {queued:'Đã nhận dữ liệu',running:'Đang xử lý…',completed:'Nhập dữ liệu thành công',completed_with_errors:'Hoàn tất có lỗi',failed:'Tác vụ thất bại'}[job.status];
   $('status-message').textContent = job.message;
+  $('job-mode').hidden = typeof job.create_database !== 'boolean';
+  $('job-mode').textContent = job.create_database ? 'Chế độ đã gửi: tạo mới / xóa và tạo lại nếu đã tồn tại' : 'Chế độ đã gửi: dùng database hiện có, không DROP/CREATE';
   $('status-message').className = ['failed','completed_with_errors'].includes(job.status) ? 'error' : '';
   $('progress').value = job.progress; $('percent').textContent = `${job.progress}%`;
   if (['completed','completed_with_errors'].includes(job.status)) {
