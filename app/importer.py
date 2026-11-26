@@ -55,14 +55,12 @@ def convert(xml_path, output):
     if not shutil.which('java'):
         raise ImportFailure('Không tìm thấy Java. Cần Java 11 trở lên trên máy chủ.')
     output.mkdir(exist_ok=True)
-    try:
-        with (output.parent / 'parser.log').open('wb') as log:
-            result = subprocess.run(['java', '-Xmx1g', '-Dfile.encoding=UTF-8', '-jar',
-                                     str(ROOT / 'vendor/boda-nokiacmdataparser.jar'),
-                                     '-i', str(xml_path), '-o', str(output)],
-                                    stdout=log, stderr=subprocess.STDOUT, timeout=3600, cwd=output.parent)
-    except subprocess.TimeoutExpired as exc:
-        raise ImportFailure('Chuyển đổi vượt quá thời gian 60 phút.') from exc
+    # Let the JVM choose heap size from available RAM; JAVA_TOOL_OPTIONS can override it.
+    with (output.parent / 'parser.log').open('wb') as log:
+        result = subprocess.run(['java', '-Dfile.encoding=UTF-8', '-jar',
+                                 str(ROOT / 'vendor/boda-nokiacmdataparser.jar'),
+                                 '-i', str(xml_path), '-o', str(output)],
+                                stdout=log, stderr=subprocess.STDOUT, cwd=output.parent)
     files = sorted(output.rglob('*.csv'))
     if result.returncode or not files:
         raise ImportFailure('JAR không tạo được CSV. Kiểm tra XML đúng định dạng Nokia RAML20 và có managedObject.')

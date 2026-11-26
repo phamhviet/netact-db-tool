@@ -39,7 +39,9 @@ def test_dtd_rejected(tmp_path):
 
 def test_api_validation():
     assert client.get('/').status_code == 200
-    assert client.get('/api/health').json()['java'] is True
+    health = client.get('/api/health').json()
+    assert health['java'] is True
+    assert health['max_upload_mb'] is None
     response = client.post('/api/connection', json={'password': 'DO_NOT_ECHO'})
     assert response.status_code == 422
     assert 'DO_NOT_ECHO' not in response.text

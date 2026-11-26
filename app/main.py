@@ -1,4 +1,3 @@
-import os
 import secrets
 import shutil
 import tempfile
@@ -26,7 +25,6 @@ executor = ThreadPoolExecutor(max_workers=1)
 active = threading.BoundedSemaphore(1)
 jobs = {}
 lock = threading.Lock()
-MAX_UPLOAD = int(os.getenv('MAX_UPLOAD_MB', '1024')) * 1024 * 1024
 
 
 class ConnectionConfig(BaseModel):
@@ -107,7 +105,7 @@ def index():
 
 @app.get('/api/health')
 def health():
-    return {'status': 'ok', 'java': shutil.which('java') is not None, 'max_upload_mb': MAX_UPLOAD // (1024 * 1024)}
+    return {'status': 'ok', 'java': shutil.which('java') is not None, 'max_upload_mb': None}
 
 
 @app.post('/api/connection')
@@ -142,8 +140,6 @@ async def create_job(config: str = Form(...), file: UploadFile = File(...)):
         with (folder / 'input.xml').open('wb') as stream:
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
-                if size > MAX_UPLOAD:
-                    raise HTTPException(413, f'File vượt giới hạn {MAX_UPLOAD // (1024 * 1024)} MB.')
                 stream.write(chunk)
         if not size:
             raise HTTPException(400, 'File XML rỗng.')

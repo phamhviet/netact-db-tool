@@ -3,8 +3,6 @@ services:
     build: .
     ports:
       - "127.0.0.1:8000:8000"
-    environment:
-      MAX_UPLOAD_MB: "1024"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

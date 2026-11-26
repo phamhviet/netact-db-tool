@@ -1,7 +1,6 @@
 const $ = id => document.getElementById(id);
 const form = $('import-form');
 let busy = false;
-let maxBytes = 1024 ** 3;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function config() {
   return {db_type: $('db_type').value, host: $('host').value.trim(), port: Number($('port').value),
@@ -94,8 +93,8 @@ async function poll(id) {
 form.addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return;
   const file = $('xml-file').files[0];
-  if (!file || !file.name.toLowerCase().endsWith('.xml') || file.size > maxBytes || !file.size) {
-    $('status-message').textContent = 'Vui lòng chọn file .xml không rỗng, trong giới hạn dung lượng.';
+  if (!file || !file.name.toLowerCase().endsWith('.xml') || !file.size) {
+    $('status-message').textContent = 'Vui lòng chọn file .xml không rỗng.';
     $('status-message').className = 'error'; return;
   }
   const body = new FormData(); body.append('config',JSON.stringify(config())); body.append('file',file);
@@ -111,8 +110,8 @@ form.addEventListener('submit', async event => {
 });
 (async () => {
   try {
-    const health = await request('/api/health'); maxBytes = health.max_upload_mb * 1024 ** 2;
-    $('upload-limit').textContent = `.XML · RAML20 · tối đa ${health.max_upload_mb} MB`;
+    const health = await request('/api/health');
+    $('upload-limit').textContent = '.XML · RAML20 · không giới hạn dung lượng';
     if (!health.java) {$('status-message').textContent = 'Máy chủ chưa có Java. Cần cài Java trước khi chuyển đổi.'; $('status-message').className = 'error';}
     const job = sessionStorage.getItem('netact-job');
     if (job) {setBusy(true); try {await poll(job);} finally {setBusy(false);}}
