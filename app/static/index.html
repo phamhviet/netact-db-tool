@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="vi">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NetAct · XML to Database</title><link rel="stylesheet" href="/static/style.css"><script defer src="/static/app.js"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NetAct · XML to Database</title><link rel="stylesheet" href="/static/style.css"><script defer src="/static/app.js"></script><script defer src="/static/browser.js"></script></head>
 <body>
-<aside><a class="brand" href="/">N<span>NetAct <small>DATA WORKSPACE</small></span></a><div class="nav active">▦ <span>XML → Database</span></div><div class="aside-bottom"><span class="dot"></span> Local processing<br><small>Dữ liệu xử lý trên máy chủ của bạn</small></div></aside>
-<main><header><span>DATA TOOLS <b>/</b> XML Import</span><span class="badge">NOKIA RAML20</span></header>
-<section class="intro"><div class="eyebrow">IMPORT WORKSPACE</div><h1>Từ XML đến database.</h1><p>Chuyển đổi dữ liệu cấu hình NetAct và nhập vào cơ sở dữ liệu trong một quy trình.</p><div class="flow"><span><i>1</i> Chọn XML</span><em>→</em><span><i>2</i> Kết nối database</span><em>→</em><span><i>3</i> Chuyển đổi & nhập</span></div></section>
+<aside><a class="brand" href="/">N<span>NetAct <small>DATA WORKSPACE</small></span></a><button type="button" class="nav active" data-view="import">▦ <span>XML → Database</span></button><button type="button" class="nav" data-view="browser">▤ <span>Duyệt database</span></button><div class="aside-bottom"><span class="dot"></span> Local processing<br><small>Dữ liệu xử lý trên máy chủ của bạn</small></div></aside>
+<main><header><span id="workspace-label">DATA TOOLS <b>/</b> XML Import</span><span class="badge">NOKIA RAML20</span></header>
+<div id="import-view"><section class="intro"><div class="eyebrow">IMPORT WORKSPACE</div><h1>Từ XML đến database.</h1><p>Chuyển đổi dữ liệu cấu hình NetAct và nhập vào cơ sở dữ liệu trong một quy trình.</p><div class="flow"><span><i>1</i> Chọn XML</span><em>→</em><span><i>2</i> Kết nối database</span><em>→</em><span><i>3</i> Chuyển đổi & nhập</span></div></section>
 <form id="import-form">
 <div class="columns"><div class="form-column">
 <section class="card"><div class="section-title"><span class="step">01</span><div><h2>File nguồn</h2><p>Chọn bản xuất cấu hình Nokia NetAct</p></div></div>
@@ -19,5 +19,14 @@
 <section class="card status" id="status-panel" aria-live="polite"><div class="eyebrow">TRẠNG THÁI TÁC VỤ</div><h3 id="status-title">Sẵn sàng nhận dữ liệu</h3><p id="status-message">Chọn XML và kiểm tra cấu hình để bắt đầu.</p><progress id="progress" max="100" value="0"></progress><span id="percent">0%</span><div id="result-summary"></div></section></div></div>
 </form>
 <section class="card results" id="results" hidden><div class="section-title"><span class="step">✓</span><div><h2>Kết quả nhập dữ liệu</h2><p id="totals"></p></div></div><div class="table-wrap"><table><thead><tr><th>Bảng đích</th><th>Số dòng</th><th>Số cột</th></tr></thead><tbody id="result-rows"></tbody></table></div></section>
+</div>
+<section id="browser-view" hidden>
+<div class="intro"><div class="eyebrow">DATABASE EXPLORER</div><h1>Duyệt dữ liệu trực tiếp.</h1><p>Kết nối database, xem bảng và tải toàn bộ dữ liệu ra CSV.</p></div>
+<section class="card"><div class="section-title"><span class="step">↔</span><div><h2>Kết nối database để xem</h2><p>Không cần upload XML. Chỉ thực hiện thao tác đọc dữ liệu.</p></div></div>
+<form id="browse-connect-form"><div id="browse-fields"></div><div class="connection-row"><button class="button secondary" id="browse-connect" type="submit">Kết nối & xem bảng</button><button class="button secondary" id="browse-disconnect" type="button" hidden>Ngắt kết nối</button><span id="browse-connection" role="status"></span></div></form>
+<p class="privacy">Mật khẩu chỉ giữ trong bộ nhớ của tab này; ngắt kết nối hoặc tải lại trang để xóa phiên duyệt.</p></section>
+<div id="browse-data" hidden><div class="explorer-layout"><section class="card table-list-card"><label>Schema<select id="browse-schema"></select></label><label class="table-search">Tìm bảng<input id="browse-filter" placeholder="Nhập tên bảng…" type="search"></label><div class="list-heading"><span id="browse-table-count"></span><button class="button secondary compact" id="browse-refresh" type="button">Làm mới</button></div><div id="browse-tables" class="table-list"></div></section>
+<section class="card data-card"><div class="data-heading"><div><h2 id="browse-table-name">Chọn bảng để xem</h2><p class="privacy" id="browse-table-info">Dữ liệu được tải theo từng trang.</p></div><button class="button secondary" id="browse-export" type="button" disabled>↓ Export CSV</button></div><p id="browse-message" role="status"></p><div class="table-wrap browser-table"><table><thead id="browse-head"></thead><tbody id="browse-rows"></tbody></table></div><div class="pagination"><label>Số dòng/trang<select id="browse-page-size"><option>50</option><option selected>100</option><option>500</option><option>1000</option></select></label><span id="browse-page-info"></span><button class="button secondary" id="browse-prev" type="button" disabled>← Trước</button><button class="button secondary" id="browse-next" type="button" disabled>Tiếp →</button></div></section></div></div>
+</section>
 <footer>NETACT DB TOOL <span>MariaDB · PostgreSQL · MySQL</span></footer>
 </main></body></html>

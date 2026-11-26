@@ -61,6 +61,44 @@ Mở `http://localhost:8000`. Nếu database chạy trên cùng máy Docker, nh�
 `host.docker.internal`, không dùng `localhost`. Compose chỉ mở cổng trên loopback của máy chủ.
 Dừng bằng `docker compose down`.
 
+## Duyệt database và export CSV trên web
+
+1. Chọn **Duyệt database** ở thanh bên (trên điện thoại cũng có nút chuyển mục).
+2. Nhập loại database, host, port, tên database, username, password và TLS.
+   Nhấn **Kết nối & xem bảng**. Không cần XML; database phải tồn tại sẵn.
+3. Chọn schema, tìm tên bảng và nhấn bảng để xem dữ liệu. Nút **Làm mới** tải lại danh sách bảng.
+4. Chọn 50/100/500/1.000 dòng mỗi trang, dùng **Trước/Tiếp** để xem tiếp.
+5. Nhấn **Export CSV** để tải **toàn bộ bảng đang chọn**, không chỉ trang đang xem.
+6. Nhấn **Ngắt kết nối** để xóa phiên duyệt; muốn đổi thông tin kết nối, ngắt rồi nhập lại.
+
+- Chức năng duyệt chỉ đọc, tài khoản DB cần quyền xem schema/bảng và SELECT.
+  Không có chức năng chạy SQL tùy ý, sửa hoặc xóa dữ liệu.
+- Tên bảng/schema được kiểm tra với metadata DB; tên có khoảng trắng hoặc dấu ngoặc kép vẫn được xử lý.
+- Mật khẩu được giữ trong bộ nhớ của tab, gửi trong body POST để đọc dữ liệu,
+  không lưu vào localStorage/sessionStorage, URL hay cấu hình máy chủ. Tải lại trang sẽ phải kết nối lại.
+  Máy chủ mở và đóng kết nối cho từng yêu cầu, không lưu phiên chứa mật khẩu.
+- Nếu bảng có khóa chính, trang dữ liệu được sắp xếp theo khóa chính. Bảng không có khóa chính
+  không đảm bảo thứ tự cố định; thay đổi dữ liệu đồng thời có thể khiến dòng lặp/thiếu giữa các trang.
+  Không chạy COUNT toàn bảng khi mở trang để tránh truy vấn nặng trên bảng lớn.
+- Ô dài chỉ hiển thị 500 ký tự trên web; export giữ giá trị đầy đủ.
+  CSV là UTF-8 BOM, có header và quoting dấu phẩy/ngoặc kép/xuống dòng.
+  SQL NULL thành ô rỗng trong CSV; dữ liệu binary thành chuỗi `base64:...`.
+- Export dùng cursor theo lô 1.000 dòng và browser tải trực tiếp, không gom toàn bộ bảng vào RAM.
+  Không đặt giới hạn số dòng export. Phiên duyệt và export là độc lập;
+  ngắt kết nối trên web không hủy download đã bắt đầu. Nếu mất kết nối DB/mạng giữa chừng,
+  file CSV có thể bị thiếu; cần tải lại. Nếu bị từ chối trước khi tải, lỗi hiển thị ở tab mới.
+- Dùng HTTPS khi truy cập qua mạng; phạm vi một người dùng/mạng tin cậy như phần triển khai bên dưới.
+
+![Giao diện duyệt database](docs/database-explorer.png)
+
+## Chẩn đoán tác vụ thất bại
+
+Thông báo lỗi nhập dữ liệu cho biết giai đoạn **Chuyển XML sang CSV**, **Kết nối/tạo database**
+hoặc **Tạo bảng/nhập CSV**, kèm loại exception và mã lỗi DB nếu driver cung cấp.
+Ví dụ MariaDB `1045` là lỗi xác thực, `1007` là database đã tồn tại, `1406` là giá trị vượt kiểu cột;
+PostgreSQL `42501` là thiếu quyền. Gửi nguyên thông báo mới nếu cần hỗ trợ, không cần gửi cả XML.
+Log máy chủ chỉ ghi mã tác vụ, giai đoạn, loại exception và mã lỗi, không ghi mật khẩu/câu SQL/dữ liệu XML.
+
 ## Hành vi nhập và xử lý lỗi
 
 - Hỗ trợ MariaDB, PostgreSQL, MySQL qua SQLAlchemy. **MariaDB 11.4 và PostgreSQL 17 đã có kiểm thử tích hợp**;
@@ -126,7 +164,8 @@ docker rm -f netact-test-pg netact-test-maria
 ```
 
 Kiểm thử chạy JAR thật, upload API, tạo DB tạm, đọc lại giá trị tiếng Việt/ID `001`,
-kiểm tra từ chối bảng trùng và dọn bảng sau lỗi CSV. Chỉ DB tên ngẫu nhiên do test tạo mới bị xóa.
+kiểm tra từ chối bảng trùng và dọn bảng sau lỗi CSV. Kiểm thử database còn xác minh danh sách bảng,
+phân trang, tên bảng có dấu ngoặc kép, NULL và export 1.205 dòng qua nhiều lô, giữ nguyên giá trị CSV. Chỉ DB tên ngẫu nhiên do test tạo mới bị xóa.
 Chưa có XML thực tế của người dùng để xác nhận các class/list đặc thù hoặc hiệu năng file lớn.
 
 ## Thành phần bên thứ ba

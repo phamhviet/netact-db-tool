@@ -5,18 +5,20 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import text
 
+from app.errors import failure_details
+from app.config import ConnectionConfig
+from app.browser import router as browser_router
 from app.importer import ImportFailure, convert, engine_for, import_csvs, prepare_database
 
 app = FastAPI(title='NetAct XML → Database', docs_url=None, redoc_url=None)
+app.include_router(browser_router)
 STATIC = Path(__file__).parent / 'static'
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 executor = ThreadPoolExecutor(max_workers=1)
@@ -24,31 +26,6 @@ active = threading.BoundedSemaphore(1)
 jobs = {}
 lock = threading.Lock()
 
-
-class ConnectionConfig(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    db_type: Literal['mariadb', 'mysql', 'postgres'] = 'mariadb'
-    host: str = Field(min_length=1, max_length=253)
-    port: int = Field(ge=1, le=65535)
-    database: str = Field(pattern=r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
-    username: str = Field(min_length=1, max_length=128)
-    password: SecretStr
-    create_database: bool = False
-    ssl_mode: Literal['disable', 'require', 'verify-full'] = 'disable'
-
-    @field_validator('ssl_mode')
-    @classmethod
-    def supported_tls(cls, value, info):
-        if value == 'require' and info.data.get('db_type') != 'postgres':
-            raise ValueError('MariaDB/MySQL: chọn disable hoặc verify-full.')
-        return value
-
-    @field_validator('host', 'username')
-    @classmethod
-    def clean(cls, value):
-        if any(ord(c) < 32 for c in value):
-            raise ValueError('Ký tự điều khiển không hợp lệ.')
-        return value.strip()
 
 
 def update(job_id, **fields):
@@ -58,19 +35,23 @@ def update(job_id, **fields):
 
 def run_job(job_id, config, folder):
     engine = None
+    stage = 'xml_to_csv'
     try:
         update(job_id, status='running', progress=10, message='Kiểm tra XML và chuyển đổi bằng JAR…')
         files = convert(folder / 'input.xml', folder / 'csv')
         update(job_id, progress=40, message=f'Đã tạo {len(files)} CSV. Đang kết nối database…')
+        stage = 'database_connect'
         engine = prepare_database(config)
+        with engine.connect() as connection:
+            connection.execute(text('SELECT 1'))
+        stage = 'csv_to_database'
         result = import_csvs(engine, files, lambda percent, message: update(job_id, progress=percent, message=message))
         update(job_id, status='completed', progress=100, message='Hoàn tất chuyển đổi và nhập dữ liệu.',
                tables=result, total_rows=sum(t['rows'] for t in result))
     except ImportFailure as exc:
-        update(job_id, status='failed', message=str(exc))
-    except Exception:
-        # Driver/parser exception messages may contain credentials, queries or XML data.
-        update(job_id, status='failed', message='Xử lý thất bại. Kiểm tra XML, kết nối, quyền tạo database/bảng và dung lượng máy chủ. Database mới tạo có thể còn tồn tại; xem README trước khi thử lại.')
+        update(job_id, status='failed', stage=stage, message=str(exc))
+    except Exception as exc:
+        update(job_id, status='failed', **failure_details(exc, stage, job_id))
     finally:
         if engine is not None:
             engine.dispose()
@@ -91,7 +72,10 @@ async def same_origin(request: Request, call_next):
     expected = f"{request.url.scheme}://{request.headers.get('host', '')}"
     if request.method == 'POST' and origin and origin != expected:
         return JSONResponse({'detail': 'Yêu cầu khác nguồn không được phép.'}, status_code=403)
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path.startswith('/api/browser/'):
+        response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @app.get('/')

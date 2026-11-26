@@ -1,4 +1,6 @@
 import json
+import csv
+import io
 import os
 import subprocess
 import time
@@ -174,6 +176,31 @@ def test_job_reports_xml_position_without_connecting_to_database(monkeypatch):
     assert 'DO_NOT_ECHO_PASSWORD' not in json.dumps(job)
 
 
+def test_database_error_is_specific_without_leaking_credentials(caplog):
+    from sqlalchemy.exc import OperationalError
+    from pymysql.err import OperationalError as MySQLError
+    from app.errors import failure_details
+    error = OperationalError('PRIVATE_SQL', {'password': 'PRIVATE_PASSWORD'},
+                             MySQLError(1045, 'PRIVATE_DRIVER_MESSAGE'))
+    details = failure_details(error, 'database_connect', 'test-id')
+    assert details['error_code'] == '1045'
+    assert 'Kết nối/tạo database' in details['message']
+    assert 'Sai tài khoản/mật khẩu' in details['message']
+    assert 'PRIVATE_' not in json.dumps(details)
+    assert 'PRIVATE_' not in caplog.text
+
+
+def test_postgres_privilege_error_is_identified():
+    from sqlalchemy.exc import ProgrammingError
+    from psycopg.errors import InsufficientPrivilege
+    from app.errors import failure_details
+    details = failure_details(ProgrammingError('PRIVATE_SQL', {}, InsufficientPrivilege('PRIVATE_MESSAGE')),
+                              'csv_to_database', 'test-id')
+    assert details['error_code'] == '42501'
+    assert 'thiếu quyền' in details['message']
+    assert 'PRIVATE_' not in json.dumps(details)
+
+
 @pytest.mark.parametrize('db_type,port,user', [('postgres',55432,'postgres'), ('mariadb',53306,'root')])
 def test_real_database_workflow(db_type, port, user, tmp_path):
     if os.getenv('NETACT_TEST_DATABASES') != '1':
@@ -205,6 +232,47 @@ def test_real_database_workflow(db_type, port, user, tmp_path):
         with target.connect() as conn:
             rows = conn.exec_driver_sql(f'SELECT {q("name")}, {q("id")} FROM {q(table)} ORDER BY {q("id")}').all()
         assert rows == [('Trạm Hà Nội', '001'), ('Station B', '002')]
+        browse = {'config': config}
+        listing = client.post('/api/browser/tables', json=browse)
+        assert listing.status_code == 200, listing.text
+        assert table in listing.json()['tables']
+        schema = listing.json()['schema']
+        query = {'config': config, 'schema_name': schema, 'table': table, 'page_size': 1}
+        preview = client.post('/api/browser/rows', json=query)
+        assert preview.status_code == 200, preview.text
+        assert len(preview.json()['rows']) == 1
+        assert preview.json()['has_next'] is True
+        assert preview.json()['ordered'] is False
+        assert client.post('/api/browser/rows', json={**query, 'offset': 1}).json()['has_next'] is False
+        assert client.post('/api/browser/rows', json={**query, 'table': 'missing; DROP DATABASE x'}).status_code == 404
+        assert client.post('/api/browser/rows', json={**query, 'schema_name': 'missing'}).status_code == 404
+        assert client.post('/api/browser/rows', json={**query, 'offset': -1}).status_code == 422
+        assert client.post('/api/browser/rows', json={**query, 'page_size': 1001}).status_code == 422
+        # A quote in a real table name must be handled as an identifier, never SQL.
+        from sqlalchemy import Column, Integer, MetaData, Table, Text
+        special = Table('quoted " table', MetaData(), Column('id', Integer, primary_key=True),
+                        Column('value', Text), Column('nullable', Text))
+        value = 'Tiếng Việt, "quoted"\n' + 'x' * 600
+        with target.begin() as conn:
+            special.create(conn)
+            conn.execute(special.insert(), [{'id': number, 'value': value, 'nullable': None} for number in range(1, 1206)])
+        query['table'] = special.name
+        query['page_size'] = 100
+        page = client.post('/api/browser/rows', json={**query, 'offset': 100}).json()
+        assert page['ordered'] is True
+        assert len(page['rows']) == 100
+        assert page['rows'][0] == ['101', value, None]
+        exported = client.post('/api/browser/export', data={'query': json.dumps(query)})
+        assert exported.status_code == 200, exported.text
+        assert exported.headers['content-disposition'].startswith('attachment;')
+        assert exported.content.startswith(b'\xef\xbb\xbf')
+        csv_rows = list(csv.reader(io.StringIO(exported.content.decode('utf-8-sig'))))
+        assert csv_rows[0] == ['id', 'value', 'nullable']
+        assert len(csv_rows) == 1206  # Export all rows, not only the selected page.
+        assert all(row[1:] == [value, ''] for row in csv_rows[1:])
+        assert config['password'] not in listing.text
+        assert config['password'] not in preview.text
+        assert config['password'] not in exported.text
         # All target tables are checked before any CREATE/INSERT.
         files = convert(FIXTURE, tmp_path / 'csv')
         with pytest.raises(ImportFailure, match='đã tồn tại'):
