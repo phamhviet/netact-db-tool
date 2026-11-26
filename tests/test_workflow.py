@@ -202,19 +202,26 @@ def test_postgres_privilege_error_is_identified():
 
 
 @pytest.mark.parametrize('db_type,port,user', [('postgres',55432,'postgres'), ('mariadb',53306,'root')])
-def test_real_database_workflow(db_type, port, user, tmp_path):
+def test_real_database_workflow(db_type, port, user, tmp_path, monkeypatch):
     if os.getenv('NETACT_TEST_DATABASES') != '1':
         pytest.skip('Set NETACT_TEST_DATABASES=1 with disposable database services')
     config = dict(db_type=db_type, host='127.0.0.1', port=port, username=user,
                   password='local-test-only', database='netact_test_' + uuid.uuid4().hex[:12],
                   create_database=True, ssl_mode='disable')
+    from app import settings
+    env_file = tmp_path / '.env'
+    prefix = settings.PREFIXES[db_type]
+    env_file.write_text(f'{prefix}_HOST=127.0.0.1\n{prefix}_PORT={port}\n{prefix}_USER={user}\n'
+                        f'{prefix}_PASSWORD=local-test-only\n{prefix}_SSL_MODE=disable\n')
+    monkeypatch.setattr(settings, 'ENV_FILE', env_file)
+    api_config = {**config, 'password': '', 'use_saved_credentials': True}
     parsed = ConnectionConfig(**config)
     admin = engine_for(parsed, 'postgres' if db_type == 'postgres' else 'information_schema')
     target = None
     try:
-        assert client.post('/api/connection', json=config).json()['ok']
+        assert client.post('/api/connection', json=api_config).json()['ok']
         with FIXTURE.open('rb') as upload:
-            response = client.post('/api/jobs', data={'config': json.dumps(config)}, files={'file': ('sample.xml', upload, 'application/xml')})
+            response = client.post('/api/jobs', data={'config': json.dumps(api_config)}, files={'file': ('sample.xml', upload, 'application/xml')})
         assert response.status_code == 202, response.text
         job_id = response.json()['id']
         deadline = time.monotonic() + 30
@@ -232,12 +239,12 @@ def test_real_database_workflow(db_type, port, user, tmp_path):
         with target.connect() as conn:
             rows = conn.exec_driver_sql(f'SELECT {q("name")}, {q("id")} FROM {q(table)} ORDER BY {q("id")}').all()
         assert rows == [('Trạm Hà Nội', '001'), ('Station B', '002')]
-        browse = {'config': config}
+        browse = {'config': api_config}
         listing = client.post('/api/browser/tables', json=browse)
         assert listing.status_code == 200, listing.text
         assert table in listing.json()['tables']
         schema = listing.json()['schema']
-        query = {'config': config, 'schema_name': schema, 'table': table, 'page_size': 1}
+        query = {'config': api_config, 'schema_name': schema, 'table': table, 'page_size': 1}
         preview = client.post('/api/browser/rows', json=query)
         assert preview.status_code == 200, preview.text
         assert len(preview.json()['rows']) == 1
@@ -284,7 +291,7 @@ def test_real_database_workflow(db_type, port, user, tmp_path):
         verify_original_script_cases(target, tmp_path, db_type)
         # Creating a database now means DROP IF EXISTS + CREATE with the same name.
         # Leaving the option off, or testing a connection, must preserve existing data.
-        assert client.post('/api/connection', json=config).json()['ok']
+        assert client.post('/api/connection', json=api_config).json()['ok']
         assert inspect(target).get_table_names()
         reused = prepare_database(ConnectionConfig(**{**config, 'create_database': False}))
         assert inspect(reused).get_table_names()

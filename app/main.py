@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.errors import failure_details, DatabaseOperationError
+from app.settings import public_database_profiles
 from app.config import ConnectionConfig
 from app.browser import router as browser_router
 from app.importer import ImportFailure, convert, engine_for, import_csvs, prepare_database, administration_engine
@@ -96,6 +97,14 @@ def index():
 @app.get('/api/health')
 def health():
     return {'status': 'ok', 'java': shutil.which('java') is not None, 'max_upload_mb': None}
+
+
+@app.get('/api/db-presets')
+def db_presets():
+    try:
+        return JSONResponse(public_database_profiles(), headers={'Cache-Control': 'no-store'})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @app.post('/api/connection')

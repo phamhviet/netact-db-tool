@@ -51,6 +51,62 @@ host, port, database, username, password và TLS. Nhấn **Kiểm tra kết nố
 - `verify-full` xác minh TLS bằng CA tin cậy của máy chủ. Chứng chỉ riêng cần cài CA trên máy chủ;
   không tắt xác minh để khắc phục lỗi chứng chỉ. PostgreSQL còn có `require` (mã hóa, không xác minh danh tính máy chủ).
 
+## Lưu cấu hình 3 loại database trong .env
+
+Sau khi cập nhật mã nguồn, cài lại dependencies: `python -m pip install -r requirements.txt`
+(Windows có thể dùng `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`).
+
+Tạo `.env` cạnh `README.md` bằng cách sao chép `.env.example` **nếu chưa có file .env**.
+Trong PowerShell:
+
+```powershell
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+notepad .env
+```
+
+Mỗi loại DB có cấu hình riêng:
+
+```dotenv
+MARIADB_HOST=192.168.1.10
+MARIADB_PORT=3306
+MARIADB_USER=your_user
+MARIADB_PASSWORD='your_password'
+MARIADB_DATABASE=
+MARIADB_SSL_MODE=disable
+
+POSTGRES_HOST=192.168.1.20
+POSTGRES_PORT=5432
+POSTGRES_USER=your_user
+POSTGRES_PASSWORD='your_password'
+POSTGRES_DATABASE=
+POSTGRES_SSL_MODE=disable
+
+MYSQL_HOST=192.168.1.30
+MYSQL_PORT=3306
+MYSQL_USER=your_user
+MYSQL_PASSWORD='your_password'
+MYSQL_DATABASE=
+MYSQL_SSL_MODE=disable
+```
+
+Đây là địa chỉ ví dụ; thay bằng IP/user/password thực tế. `DATABASE` để trống nếu muốn tự nhập tên trên web.
+Đặt password trong dấu nháy đơn nếu có `#`, `$` hoặc khoảng trắng; Python không nội suy biến trong giá trị.
+Khởi động lại ứng dụng sau khi sửa cấu hình, rồi tải lại trang.
+
+- Khi chọn MariaDB/PostgreSQL/MySQL, cả form nhập XML và form duyệt DB tự điền host, port, user,
+  TLS và tên database nếu đã cấu hình. Có thể sửa các ô trên web.
+- Nếu có biến `*_PASSWORD` (kể cả giá trị rỗng), ô **Dùng mật khẩu trong .env** được chọn sẵn.
+  Mật khẩu được dùng ở server; API chỉ trả cờ có mật khẩu, không trả mật khẩu xuống trình duyệt.
+- Đổi host/port/user/TLS sẽ tắt sử dụng mật khẩu lưu sẵn. Muốn dùng kết nối khác, nhập mật khẩu riêng;
+  không tự chuyển mật khẩu trong .env sang địa chỉ khác. Gõ mật khẩu riêng cũng tắt ô sử dụng .env.
+- `.env` được Git và Docker build bỏ qua. Chỉ `.env.example` với giá trị mẫu được đưa lên GitHub.
+  Không điền mật khẩu thật vào `.env.example`. Biến môi trường của tiến trình ưu tiên hơn file `.env`.
+- Docker Compose đọc file `.env` bằng `env_file` (Compose 2.24+); nếu không có vẫn chạy và nhập thủ công.
+  Sau khi thay `.env`, chạy lại `docker compose up -d --force-recreate` để cập nhật biến trong container.
+  Không dùng `localhost` làm DB host trong container nếu DB nằm ở máy chủ; dùng host phù hợp.
+- Cấu hình .env là dùng chung cho người được quyền truy cập ứng dụng này. Giữ phạm vi máy cá nhân/mạng tin cậy
+  như phần triển khai; ngắt phiên duyệt không xóa cấu hình .env ở server.
+
 ## Chạy bằng Docker
 
 ```bash
@@ -74,7 +130,7 @@ Dừng bằng `docker compose down`.
 - Chức năng duyệt chỉ đọc, tài khoản DB cần quyền xem schema/bảng và SELECT.
   Không có chức năng chạy SQL tùy ý, sửa hoặc xóa dữ liệu.
 - Tên bảng/schema được kiểm tra với metadata DB; tên có khoảng trắng hoặc dấu ngoặc kép vẫn được xử lý.
-- Mật khẩu được giữ trong bộ nhớ của tab, gửi trong body POST để đọc dữ liệu,
+- Mật khẩu nhập tay được giữ trong bộ nhớ của tab, gửi trong body POST để đọc dữ liệu,
   không lưu vào localStorage/sessionStorage, URL hay cấu hình máy chủ. Tải lại trang sẽ phải kết nối lại.
   Máy chủ mở và đóng kết nối cho từng yêu cầu, không lưu phiên chứa mật khẩu.
 - Nếu bảng có khóa chính, trang dữ liệu được sắp xếp theo khóa chính. Bảng không có khóa chính
@@ -156,7 +212,7 @@ Log chỉ ghi mã tác vụ, giai đoạn, thao tác, loại exception và mã l
   sang UTF-8 và loại DOCTYPE trước khi gọi JAR, không tải DTD ngoài. File upload gốc không bị sửa.
   Khai báo entity bị từ chối; cần xuất XML với giá trị trực tiếp. Lỗi cú pháp được báo theo dòng/cột của file gốc.
   Đây không phải bộ chuyển đổi cho mọi cấu trúc XML. File tạm có tên `input.xml`, nên cột FILENAME của CSV mang tên đó.
-- XML, CSV và log JAR tạm bị xóa sau tác vụ; không lưu mật khẩu vào cấu hình, log hoặc kết quả.
+- XML, CSV và log JAR tạm bị xóa sau tác vụ; không ghi mật khẩu nhập trên form vào file cấu hình, log hoặc kết quả.
   Mật khẩu dùng trong bộ nhớ của tiến trình để kết nối và được xóa khỏi form sau khi nhận tác vụ.
   Metadata kết quả giữ tối đa 100 tác vụ/24 giờ trong bộ nhớ, mất khi khởi động lại.
   Session trình duyệt chỉ lưu mã tác vụ để tiếp tục theo dõi khi tải lại trang.

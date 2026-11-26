@@ -5,7 +5,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function config() {
   return {db_type: $('db_type').value, host: $('host').value.trim(), port: Number($('port').value),
     database: $('database').value.trim(), username: $('username').value.trim(), password: $('password').value,
-    create_database: $('create_database').checked, ssl_mode: $('ssl_mode').value};
+    create_database: $('create_database').checked, use_saved_credentials: $('use_saved_credentials').checked, ssl_mode: $('ssl_mode').value};
 }
 async function request(url, options) {
   const response = await fetch(url, options);
@@ -20,6 +20,7 @@ function setBusy(value) {
   for (const control of form.querySelectorAll('input,select,button')) control.disabled = value;
   if (!value) {
     $('tls-require').disabled = $('db_type').value !== 'postgres';
+    window.NetActPresets.refresh();
   }
 }
 function updateSummary() {
@@ -128,6 +129,7 @@ form.addEventListener('submit', async event => {
   } catch (error) {$('status-message').textContent = error.message; $('status-message').className = 'error';}
   finally {setBusy(false);}
 });
+window.NetActPresets.bind();
 updateSummary();
 (async () => {
   try {

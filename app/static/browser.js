@@ -1,7 +1,7 @@
 (() => {
   const el = id => document.getElementById(id);
   let connection = null, schema = null, table = null, offset = 0, hasNext = false, loading = false, tables = [];
-  const fieldIds = ['db_type', 'database', 'host', 'port', 'username', 'password', 'ssl_mode'];
+  const fieldIds = ['db_type', 'database', 'host', 'port', 'username', 'password', 'ssl_mode', 'use_saved_credentials'];
   for (const selector of ['.grid', '.grid.options']) {
     const source = document.querySelector(`#import-form ${selector}`);
     const copy = source.cloneNode(true);
@@ -106,6 +106,7 @@
   el('browse-connect-form').addEventListener('submit', async event => {
     event.preventDefault(); if (loading || connection) return;
     connection = Object.fromEntries(fieldIds.map(id => [id, el(`browse-${id}`).value]));
+    connection.use_saved_credentials = el('browse-use_saved_credentials').checked;
     connection.port = Number(connection.port); connection.create_database = false; schema = null;
     el('browse-connect').disabled = true;
     el('browse-connection').textContent = 'Đang kết nối…';
@@ -130,7 +131,9 @@
     fieldIds.forEach(id => {el(`browse-${id}`).disabled = false;});
     el('browse-password').value = ''; el('browse-tls-require').disabled = el('browse-db_type').value !== 'postgres';
     el('browse-connect').disabled = false;
+    window.NetActPresets.refresh('browse-');
   });
+  window.NetActPresets.bind('browse-');
   el('browse-filter').addEventListener('input', renderList);
   el('browse-schema').addEventListener('change', async () => {schema = el('browse-schema').value; try {await loadTables();} catch {}});
   el('browse-refresh').addEventListener('click', async () => {try {await loadTables();} catch {}});
