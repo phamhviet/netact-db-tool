@@ -46,8 +46,13 @@ def run_job(job_id, config, folder):
             connection.execute(text('SELECT 1'))
         stage = 'csv_to_database'
         result = import_csvs(engine, files, lambda percent, message: update(job_id, progress=percent, message=message))
-        update(job_id, status='completed', progress=100, message='Hoàn tất chuyển đổi và nhập dữ liệu.',
-               tables=result, total_rows=sum(t['rows'] for t in result))
+        failed_rows = sum(t['rows_failed'] for t in result)
+        failed_tables = sum(t['status'] == 'failed_create' for t in result)
+        has_errors = failed_rows > 0 or failed_tables > 0
+        update(job_id, status='completed_with_errors' if has_errors else 'completed', progress=100,
+               message=f'Hoàn tất: {failed_rows:,} dòng lỗi, {failed_tables:,} bảng không tạo được. Xem chi tiết bên dưới.' if has_errors else 'Hoàn tất chuyển đổi và nhập dữ liệu.',
+               tables=result, total_rows=sum(t['rows'] for t in result),
+               failed_rows=failed_rows, failed_tables=failed_tables)
     except ImportFailure as exc:
         update(job_id, status='failed', stage=stage, message=str(exc))
     except Exception as exc:
@@ -91,7 +96,7 @@ def health():
 @app.post('/api/connection')
 def test_connection(config: ConnectionConfig):
     # Read-only: never create a database from the connection-test button.
-    engine = engine_for(config, ('postgres' if config.db_type == 'postgres' else 'information_schema') if config.create_database else None)
+    engine = engine_for(config, ('postgres' if config.db_type == 'postgres' else 'information_schema') if config.create_database or config.reset_database else None)
     try:
         with engine.connect() as conn:
             conn.execute(text('SELECT 1')).scalar_one()

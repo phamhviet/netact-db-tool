@@ -41,7 +41,7 @@ DATABASE_ERRORS = {
 }
 
 
-def failure_details(exc, stage, job_id):
+def failure_details(exc, stage, job_id, log_error=True):
     code = None
     reason = 'Lỗi chưa phân loại. Gửi giai đoạn và loại lỗi bên dưới để kiểm tra tiếp.'
     if isinstance(exc, DBAPIError):
@@ -64,7 +64,8 @@ def failure_details(exc, stage, job_id):
     label = STAGES[stage]
     kind = type(exc).__name__
     # Never log str(exc), SQL, parameter values, credentials or XML contents.
-    logger.error('job=%s stage=%s exception=%s code=%s', job_id, stage, kind, code or 'none')
+    if log_error:
+        logger.error('job=%s stage=%s exception=%s code=%s', job_id, stage, kind, code or 'none')
     identifier = f'{kind}, mã {code}' if code else kind
     return {'stage': stage, 'error_code': code, 'error_type': kind,
             'message': f'{label} thất bại ({identifier}). {reason} '

@@ -9,8 +9,12 @@ from pathlib import Path
 
 from defusedxml.common import DefusedXmlException
 from defusedxml.expatreader import DefusedExpatParser
-from sqlalchemy import Column, MetaData, Table, Text, create_engine, inspect
+from sqlalchemy import Column, MetaData, Table, Text, String, create_engine
 from sqlalchemy.engine import URL
+from sqlalchemy.schema import CreateTable
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.errors import failure_details
 
 ROOT = Path(__file__).resolve().parents[1]
 csv.field_size_limit(16 * 1024 * 1024)
@@ -33,13 +37,14 @@ def engine_for(config, database=None):
 
 
 def prepare_database(config):
-    if config.create_database:
+    if config.create_database or config.reset_database:
         admin = engine_for(config, 'postgres' if config.db_type == 'postgres' else 'information_schema')
         try:
             with admin.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
                 name = admin.dialect.identifier_preparer.quote_identifier(config.database)
                 suffix = ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci' if config.db_type != 'postgres' else ''
-                # Deliberately no IF NOT EXISTS: creation must never silently reuse a database.
+                if config.reset_database:
+                    conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
                 conn.exec_driver_sql(f'CREATE DATABASE {name}{suffix}')
         finally:
             admin.dispose()
@@ -123,7 +128,7 @@ def unique_names(raw_names, limit):
 
 
 def encoding_for(path):
-    for encoding in ('utf-8-sig', 'cp1252', 'latin-1'):
+    for encoding in ('utf-8-sig', 'cp1252', 'latin-1', 'iso-8859-1'):
         try:
             with path.open(encoding=encoding) as stream:
                 for _ in stream:
@@ -134,65 +139,94 @@ def encoding_for(path):
     raise ImportFailure('Không đọc được bảng mã CSV.')
 
 
+def script_column_names(headers):
+    # Match the supplied script: 64 characters and case-sensitive duplicate handling.
+    columns = []
+    seen = set()
+    for raw in headers:
+        original = raw.strip()[:64] or 'unknown_column'
+        name = original
+        counter = 1
+        while name in seen:
+            suffix = f'_{counter}'
+            name = original[:64-len(suffix)] + suffix
+            counter += 1
+        seen.add(name)
+        columns.append(name)
+    return columns
+
+
 def import_csvs(engine, files, progress):
-    metadata = MetaData()
-    limit = 63 if engine.dialect.name == 'postgresql' else 64
-    table_names = unique_names([p.stem for p in files], limit)
-    plans = []
-    for path, name in zip(files, table_names):
-        encoding = encoding_for(path)
-        with path.open(encoding=encoding, newline='') as stream:
-            headers = next(csv.reader(stream), [])
-        if not headers:
-            continue
-        columns = unique_names(headers, limit)
-        # Preserve IDs, leading zeroes and long NetAct parameter values as text.
-        table = Table(name, metadata, *(Column(c, Text) for c in columns))
-        plans.append((path, encoding, table, headers))
-    if not plans:
-        raise ImportFailure('Không có bảng dữ liệu trong CSV.')
     results = []
-    created = []
-    try:
-        with engine.begin() as conn:
-            existing = {name.casefold() for name in inspect(conn).get_table_names()}
-            if any(table.name.casefold() in existing for _, _, table, _ in plans):
-                raise ImportFailure('Bảng đích đã tồn tại. Hãy chọn database mới hoặc database chưa có các bảng này.')
-            for index, (path, encoding, table, headers) in enumerate(plans):
-                table.create(conn, checkfirst=False)
-                created.append(table)
-                count = 0
-                batch = []
-                with path.open(encoding=encoding, newline='') as stream:
-                    reader = csv.reader(stream)
-                    next(reader)
-                    for line, row in enumerate(reader, 2):
-                        if not row:
-                            continue
-                        if len(row) > len(table.columns):
-                            raise ImportFailure(f'CSV {path.name}, dòng {line}: thừa cột, đã dừng nhập.')
-                        values = row + [''] * (len(table.columns) - len(row))
-                        if any('\x00' in value for value in values):
-                            raise ImportFailure(f'CSV {path.name}, dòng {line}: chứa ký tự NUL không hợp lệ.')
-                        batch.append(dict(zip(table.columns.keys(), values)))
-                        if len(batch) >= 500:
-                            conn.execute(table.insert(), batch)
-                            count += len(batch)
-                            batch.clear()
-                    if batch:
-                        conn.execute(table.insert(), batch)
-                        count += len(batch)
-                results.append({'table': table.name, 'rows': count,
-                                'columns': [{'source': a, 'target': b} for a, b in zip(headers, table.columns.keys())]})
-                progress(45 + int(50 * (index + 1) / len(plans)), f'Đã nhập {table.name}: {count:,} dòng')
-    except Exception as error:
-        # MariaDB/MySQL DDL commits implicitly; remove only tables created by this job.
-        if engine.dialect.name == 'mysql' and created:
-            try:
-                with engine.begin() as conn:
-                    for table in reversed(created):
-                        table.drop(conn, checkfirst=True)
-            except Exception:
-                raise ImportFailure('Nhập thất bại, không thể dọn bảng vừa tạo. Kiểm tra các bảng của tác vụ trước khi thử lại.') from error
-        raise
+    postgres = engine.dialect.name == 'postgresql'
+    with engine.connect() as conn:
+        for index, path in enumerate(files):
+            table_name = path.stem[:64] if not postgres else path.stem.encode('utf-8')[:63].decode('utf-8', errors='ignore')
+            report = {'table': table_name, 'file': path.name, 'rows': 0, 'rows_failed': 0,
+                      'status': 'imported', 'columns': [], 'errors': []}
+
+            def record_error(exc, line=None):
+                # Keep the complete counters, but bound error details for huge imports.
+                if len(report['errors']) < 20:
+                    details = failure_details(exc, 'csv_to_database', 'import', log_error=False)
+                    report['errors'].append({'line': line, 'code': details['error_code'],
+                                             'type': details['error_type'], 'message': details['message']})
+
+            encoding = encoding_for(path)
+            with path.open(encoding=encoding) as stream:
+                reader = csv.reader(stream)
+                headers = next(reader, None)
+                if headers is None:
+                    report['status'] = 'skipped_empty'
+                    results.append(report)
+                    continue
+                columns = unique_names(headers, 63) if postgres else script_column_names(headers)
+                report['columns'] = [{'source': a, 'target': b} for a, b in zip(headers, columns)]
+                max_lengths = [0] * len(columns)
+                for row in reader:
+                    for position, value in enumerate(row[:len(columns)]):
+                        max_lengths[position] = max(max_lengths[position], len(value))
+                types = [Text() if length > 255 else String(max(1, length)) for length in max_lengths]
+                # A separate MetaData per file permits truncated filenames to reuse the
+                # same existing table, just like CREATE TABLE IF NOT EXISTS in the script.
+                table = Table(table_name, MetaData(), *(Column(name, kind) for name, kind in zip(columns, types)))
+                try:
+                    if postgres:
+                        with conn.begin_nested():
+                            conn.execute(CreateTable(table, if_not_exists=True))
+                    else:
+                        conn.execute(CreateTable(table, if_not_exists=True))
+                except SQLAlchemyError as exc:
+                    report['status'] = 'failed_create'
+                    record_error(exc)
+                    results.append(report)
+                    progress(45 + int(50 * (index + 1) / max(1, len(files))), f'Bỏ qua bảng {table_name}: lỗi tạo bảng')
+                    continue
+                stream.seek(0)
+                next(reader)
+                # Positional insert deliberately matches the original script when a
+                # truncated table name reuses a table with different column names.
+                quoted = engine.dialect.identifier_preparer.quote_identifier(table_name)
+                placeholders = ', '.join('%s' for _ in columns)
+                # Both drivers use %s; the dialect preparer already escapes literal %.
+                statement = f'INSERT INTO {quoted} VALUES ({placeholders})'
+                for line, row in enumerate(reader, 2):
+                    values = (row + [''] * len(columns))[:len(columns)]
+                    parameters = tuple(values)
+                    try:
+                        if postgres:
+                            # PostgreSQL needs a savepoint to continue after a failed row.
+                            with conn.begin_nested():
+                                conn.exec_driver_sql(statement, parameters)
+                        else:
+                            conn.exec_driver_sql(statement, parameters)
+                        report['rows'] += 1
+                    except SQLAlchemyError as exc:
+                        report['rows_failed'] += 1
+                        report['status'] = 'partial'
+                        record_error(exc, line)
+            results.append(report)
+            progress(45 + int(50 * (index + 1) / max(1, len(files))),
+                     f'{table_name}: {report["rows"]:,} dòng đã nhập, {report["rows_failed"]:,} dòng lỗi')
+        conn.commit()
     return results

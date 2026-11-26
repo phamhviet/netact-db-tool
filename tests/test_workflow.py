@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 
 from app.main import app, ConnectionConfig
-from app.importer import ImportFailure, convert, engine_for, import_csvs, unique_names, normalize_xml
+from app.importer import ImportFailure, convert, engine_for, import_csvs, unique_names, normalize_xml, script_column_names, prepare_database
 
 client = TestClient(app)
 FIXTURE = Path(__file__).parent / 'fixtures/sample.xml'
@@ -273,18 +273,25 @@ def test_real_database_workflow(db_type, port, user, tmp_path):
         assert config['password'] not in listing.text
         assert config['password'] not in preview.text
         assert config['password'] not in exported.text
-        # All target tables are checked before any CREATE/INSERT.
-        files = convert(FIXTURE, tmp_path / 'csv')
-        with pytest.raises(ImportFailure, match='đã tồn tại'):
-            import_csvs(target, files, lambda *_: None)
+        # Reuse existing tables and insert again, as CREATE TABLE IF NOT EXISTS does.
+        uploaded_name = tmp_path / 'input.xml'
+        uploaded_name.write_bytes(FIXTURE.read_bytes())
+        files = convert(uploaded_name, tmp_path / 'csv')
+        repeated = import_csvs(target, files, lambda *_: None)
+        assert repeated[0]['rows'] == 2
         with target.connect() as conn:
-            assert conn.exec_driver_sql(f'SELECT COUNT(*) FROM {q(table)}').scalar() == 2
-        # A malformed row removes newly created tables (including MariaDB DDL).
-        malformed = tmp_path / 'malformed.csv'
-        malformed.write_text('a,b\n1,2,3\n')
-        with pytest.raises(ImportFailure, match='thừa cột'):
-            import_csvs(target, [malformed], lambda *_: None)
-        assert 'malformed' not in inspect(target).get_table_names()
+            assert conn.exec_driver_sql(f'SELECT COUNT(*) FROM {q(table)}').scalar() == 4
+        verify_original_script_cases(target, tmp_path, db_type)
+        # Only this test's randomly named DB is dropped/recreated.
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            ConnectionConfig(**{**config, 'reset_database': True, 'confirm_database': 'wrong'})
+        target.dispose()
+        recreated = prepare_database(ConnectionConfig(**{**config, 'reset_database': True,
+                                                        'confirm_database': config['database']}))
+        with recreated.connect() as conn:
+            assert inspect(conn).get_table_names() == []
+        recreated.dispose()
     finally:
         if target is not None:
             target.dispose()
@@ -292,3 +299,89 @@ def test_real_database_workflow(db_type, port, user, tmp_path):
             quoted = admin.dialect.identifier_preparer.quote_identifier(config['database'])
             conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {quoted}')
         admin.dispose()
+
+
+def verify_original_script_cases(engine, folder, db_type):
+    def write_csv(name, headers, rows, encoding='utf-8-sig'):
+        path = folder / name
+        with path.open('w', encoding=encoding, newline='') as stream:
+            writer = csv.writer(stream)
+            writer.writerow(headers)
+            writer.writerows(rows)
+        return path
+
+    headers = [' A ', 'A', 'A_1', '', 'x' * 80, 'x' * 80, 'FUNCTION', 'RANK', 'VERSION', '漢' * 40]
+    row = ['001', 'a', 'b', '', 'z' * 300, 'tail', 'f', 'r', 'v', 'unicode']
+    edge = write_csv('edge.csv', headers, [row, ['002'], row + ['ignored extra'], []])
+    report = import_csvs(engine, [edge], lambda *_: None)[0]
+    assert report['rows'] == 4 and report['rows_failed'] == 0
+    expected = script_column_names(headers) if db_type != 'postgres' else unique_names(headers, 63)
+    assert [c['target'] for c in report['columns']] == expected
+    with engine.connect() as conn:
+        from sqlalchemy import MetaData, Table, select, Text
+        table = Table('edge', MetaData(), autoload_with=conn)
+        rows = conn.execute(select(table)).all()
+        assert tuple(row) in [tuple(r) for r in rows]
+        assert tuple([''] * 10) in [tuple(r) for r in rows]
+        assert tuple(['002'] + [''] * 9) in [tuple(r) for r in rows]
+        assert table.c[expected[0]].type.length == 3
+        assert table.c[expected[3]].type.length == 1
+        assert isinstance(table.c[expected[4]].type, Text)
+    punctuated = write_csv('quoted%:table.csv', ['function'], [['001']])
+    assert import_csvs(engine, [punctuated], lambda *_: None)[0]['rows'] == 1
+    # A blank file is skipped; a header-only file still creates VARCHAR(1).
+    blank = folder / 'blank.csv'
+    blank.write_bytes(b'')
+    header_only = write_csv('header_only.csv', ['empty'], [])
+    reports = import_csvs(engine, [blank, header_only], lambda *_: None)
+    assert reports[0]['status'] == 'skipped_empty'
+    assert reports[1]['rows'] == 0
+    assert inspect(engine).get_columns('header_only')[0]['type'].length == 1
+    # These byte sequences require the same fallback order as the supplied script.
+    for name, value, encoding in [('cp', 'café €', 'cp1252'), ('latin', 'café \x81', 'latin-1')]:
+        path = write_csv(f'{name}.csv', ['value'], [[value]], encoding)
+        assert import_csvs(engine, [path], lambda *_: None)[0]['rows'] == 1
+        with engine.connect() as conn:
+            table = Table(name, MetaData(), autoload_with=conn)
+            assert conn.execute(select(table)).scalar_one() == value
+    # The reference script uses universal-newline text mode, including inside cells.
+    crlf = write_csv('crlf_value.csv', ['value'], [['a\r\nb']])
+    assert import_csvs(engine, [crlf], lambda *_: None)[0]['rows'] == 1
+    with engine.connect() as conn:
+        table = Table('crlf_value', MetaData(), autoload_with=conn)
+        assert conn.execute(select(table)).scalar_one() == 'a\nb'
+    # Wide short-value tables use VARCHAR, not TEXT for every column.
+    wide = write_csv('wide.csv', [f'c{n}' for n in range(400)], [['x'] * 400])
+    assert import_csvs(engine, [wide], lambda *_: None)[0]['rows'] == 1
+    assert all(c['type'].length == 1 for c in inspect(engine).get_columns('wide'))
+    too_wide = write_csv('too_wide.csv', [f'c{n}' for n in range(1700)], [['x'] * 1700])
+    good = write_csv('after_bad_create.csv', ['value'], [['ok']])
+    reports = import_csvs(engine, [too_wide, good], lambda *_: None)
+    assert reports[0]['status'] == 'failed_create'
+    assert reports[0]['errors']
+    assert reports[1]['rows'] == 1
+    # TEXT limit on MariaDB / NUL on PostgreSQL produces one rejected row,
+    # while subsequent valid rows are still committed.
+    bad_value = 'x' * 70000 if db_type != 'postgres' else 'bad\x00value'
+    failure = write_csv('row_failure.csv', ['value'], [['ok'], [bad_value], ['after']])
+    report = import_csvs(engine, [failure], lambda *_: None)[0]
+    assert report['status'] == 'partial'
+    assert report['rows'] == 2 and report['rows_failed'] == 1
+    assert report['errors'][0]['line'] == 3
+    with engine.connect() as conn:
+        table = Table('row_failure', MetaData(), autoload_with=conn)
+        assert conn.execute(select(table)).scalars().all() == ['ok', 'after']
+    # Original filename truncation may reuse one table; insert is positional.
+    first = write_csv('t' * 64 + '_first.csv', ['first'], [['a']])
+    second = write_csv('t' * 64 + '_second.csv', ['different'], [['b']])
+    reports = import_csvs(engine, [first, second], lambda *_: None)
+    assert [r['rows'] for r in reports] == [1, 1]
+    assert reports[0]['table'] == reports[1]['table']
+    with engine.connect() as conn:
+        table = Table(reports[0]['table'], MetaData(), autoload_with=conn)
+        assert conn.execute(select(table)).scalars().all() == ['a', 'b']
+
+
+def test_script_column_name_contract():
+    assert script_column_names([' A ', 'A', 'A_1', '', 'A', 'a']) == ['A', 'A_1', 'A_1_1', 'unknown_column', 'A_2', 'a']
+    assert script_column_names(['漢' * 70])[0] == '漢' * 64

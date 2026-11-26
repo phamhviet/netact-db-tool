@@ -103,19 +103,30 @@ Log máy chủ chỉ ghi mã tác vụ, giai đoạn, loại exception và mã l
 
 - Hỗ trợ MariaDB, PostgreSQL, MySQL qua SQLAlchemy. **MariaDB 11.4 và PostgreSQL 17 đã có kiểm thử tích hợp**;
   MySQL dùng cùng driver PyMySQL nhưng chưa được kiểm thử với máy chủ MySQL riêng.
-- Một CSV tạo một bảng; hàng đầu là tên cột. Toàn bộ giá trị dùng TEXT để giữ ID, số 0 đầu,
-  tiếng Việt và các tham số dạng chuỗi. Không tự chuyển chuỗi `null` thành SQL NULL.
-  MariaDB/MySQL TEXT có giới hạn 65.535 byte/giá trị; dữ liệu vượt giới hạn hoặc vượt số cột DB sẽ báo lỗi.
-- Tên bảng/cột được giới hạn theo byte UTF-8 (PostgreSQL 63; MariaDB/MySQL 64) và thêm hậu tố
-  khi trùng tên, kể cả khác nhau chữ hoa/thường. API kết quả trả ánh xạ tên cột gốc/đích.
-- Không DROP DATABASE, không ghi đè bảng. Nếu bất kỳ bảng đích nào tồn tại, dừng trước khi tạo/nhập các bảng.
-  Hãy dùng database riêng, không cho tác vụ khác đồng thời sửa cùng database trong lúc nhập.
-- Nhập theo lô 500 dòng. Thiếu cột được điền chuỗi rỗng; thừa cột hoặc có NUL thì dừng, không cắt bỏ dữ liệu.
-  Bảng mã thử UTF-8 BOM, CP1252, Latin-1 theo script tham khảo; nhận diện encoding không thể bảo đảm mọi trường hợp.
-- PostgreSQL rollback toàn bộ bảng/dữ liệu của lượt nhập khi lỗi. MariaDB/MySQL DDL tự commit,
-  ứng dụng cố gắng xóa **chỉ các bảng do lượt nhập vừa tạo** khi có lỗi.
-  Nếu mất kết nối hoặc máy chủ bị dừng đột ngột, có thể còn bảng/dữ liệu nhập dở; kiểm tra và dọn trước khi chạy lại.
-  Database mới tạo được giữ lại kể cả khi nhập lỗi; không tự xóa database.
+- Luồng import CSV bám theo script Python gốc: đọc header; thử encoding theo thứ tự UTF-8 BOM,
+  CP1252, Latin-1, ISO-8859-1; bỏ qua file rỗng; quét toàn bộ dữ liệu để xác định độ dài lớn nhất từng cột.
+- Cột có độ dài lớn nhất từ 0–255 ký tự dùng `VARCHAR(max(1, độ_dài))`; trên 255 dùng `TEXT`.
+  Giữ ID dạng chuỗi, số 0 đầu và chuỗi `null`. MariaDB/MySQL TEXT vẫn có giới hạn 65.535 byte/giá trị
+  như script gốc; dòng vượt giới hạn sẽ được ghi lỗi và bỏ qua, không tự đổi sang kiểu khác.
+- MariaDB/MySQL: tên bảng là tên file cắt 64 **ký tự**; cột được strip/cắt 64 ký tự, cột rỗng dùng
+  `unknown_column`, tên trùng được thêm `_1`, `_2`... theo kiểm tra phân biệt hoa/thường của script.
+  Trùng tên chỉ khác hoa/thường có thể khiến MariaDB từ chối tạo bảng; tác vụ ghi lỗi và chuyển bảng tiếp theo.
+  Tên bảng sau cắt có thể trùng và tái sử dụng cùng bảng. PostgreSQL được điều chỉnh theo giới hạn 63 byte UTF-8.
+- Dùng `CREATE TABLE IF NOT EXISTS`, quote tên bảng/cột để hỗ trợ từ khóa FUNCTION/RANK/VERSION.
+  Nếu bảng có sẵn thì giữ nguyên cấu trúc và insert theo vị trí cột giống script gốc.
+- Thiếu cột được điền chuỗi rỗng; thừa cột bị cắt; dòng trắng được nhập thành các giá trị rỗng.
+  Insert từng dòng giống script: lỗi tạo bảng thì bỏ bảng đó, lỗi insert thì bỏ dòng đó và tiếp tục.
+  Không rollback/xóa các bảng nhập thành công khi gặp những lỗi này. PostgreSQL dùng savepoint
+  để lỗi một dòng không làm hỏng toàn bộ transaction. Commit sau khi duyệt các file CSV.
+- Kết quả hiển thị số dòng thành công, dòng lỗi, bảng lỗi và tối đa 20 chi tiết lỗi mỗi file,
+  không chứa giá trị dữ liệu/SQL/mật khẩu. Nếu có lỗi, trạng thái là **Hoàn tất có lỗi**, không báo thành công toàn bộ.
+- Để thực hiện đúng bước `DROP DATABASE IF EXISTS` rồi `CREATE DATABASE` của script gốc,
+  chọn **Xóa và tạo lại database như script gốc** và nhập lại đúng tên database để xác nhận.
+  **Bước này xóa toàn bộ bảng/dữ liệu của database đích.** Tài khoản cần quyền DROP/CREATE DATABASE.
+  Mặc định không tự xóa database; nếu không chọn xóa hoặc tạo mới thì dùng database đang có.
+  Kiểm tra kết nối và duyệt database không bao giờ thực hiện DROP/CREATE.
+- Lỗi đọc file/CSV, commit, mất kết nối hoặc tiến trình bị dừng có thể làm tác vụ dừng và còn dữ liệu nhập dở,
+  như khi script bị gián đoạn. Không chạy đồng thời tác vụ khác sửa cùng database trong lúc import.
 - Chỉ nhận một tác vụ tại một thời điểm; chạy **1 worker**, không dùng nhiều replica.
   Tiến độ phản ánh các giai đoạn và số bảng đã xử lý, không phải phần trăm byte chính xác.
 - Không giới hạn dung lượng XML ở giao diện hoặc backend; không còn dùng `MAX_UPLOAD_MB`.
@@ -164,7 +175,8 @@ docker rm -f netact-test-pg netact-test-maria
 ```
 
 Kiểm thử chạy JAR thật, upload API, tạo DB tạm, đọc lại giá trị tiếng Việt/ID `001`,
-kiểm tra từ chối bảng trùng và dọn bảng sau lỗi CSV. Kiểm thử database còn xác minh danh sách bảng,
+kiểm tra tái sử dụng bảng, kiểu VARCHAR/TEXT, dòng thiếu/thừa/trắng, encoding, bảng 400 cột,
+lỗi tạo bảng/insert vẫn tiếp tục, tên file cắt trùng và xác nhận xóa/tạo lại database kiểm thử. Kiểm thử database còn xác minh danh sách bảng,
 phân trang, tên bảng có dấu ngoặc kép, NULL và export 1.205 dòng qua nhiều lô, giữ nguyên giá trị CSV. Chỉ DB tên ngẫu nhiên do test tạo mới bị xóa.
 Chưa có XML thực tế của người dùng để xác nhận các class/list đặc thù hoặc hiệu năng file lớn.
 

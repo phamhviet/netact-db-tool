@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class ConnectionConfig(BaseModel):
@@ -12,7 +12,15 @@ class ConnectionConfig(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: SecretStr
     create_database: bool = False
+    reset_database: bool = False
+    confirm_database: str = Field(default="", max_length=63)
     ssl_mode: Literal['disable', 'require', 'verify-full'] = 'disable'
+
+    @model_validator(mode='after')
+    def confirmed_reset(self):
+        if self.reset_database and self.confirm_database != self.database:
+            raise ValueError('Phải nhập đúng tên database để xác nhận xóa và tạo lại.')
+        return self
 
     @field_validator('ssl_mode')
     @classmethod
