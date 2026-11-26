@@ -78,11 +78,13 @@ def failure_details(exc, stage, job_id, log_error=True):
     label = STAGES[stage]
     if operation:
         label = {'server_connect': 'Kết nối máy chủ database (không chọn database đích)',
+                 'database_exists': f'Kiểm tra database [{database}] tồn tại',
                  'drop_database': f'DROP DATABASE [{database}]',
                  'create_database': f'CREATE DATABASE [{database}]',
                  'target_connect': f'Mở database [{database}]'}[operation]
     if code in ('1044', '42501') and operation:
-        reason = {'drop_database': 'Tài khoản không có quyền DROP database này.',
+        reason = {'database_exists': 'Máy chủ từ chối truy vấn kiểm tra database tồn tại.',
+                  'drop_database': 'Tài khoản không có quyền DROP database này.',
                   'create_database': 'Tài khoản không có quyền CREATE database này.',
                   'target_connect': 'Tài khoản không có quyền truy cập database đích. Kiểm tra đúng tên database và tài khoản.',
                   'server_connect': 'Máy chủ từ chối truy cập. Kiểm tra tài khoản được cấp quyền theo host kết nối.'}[operation]
@@ -91,7 +93,7 @@ def failure_details(exc, stage, job_id, log_error=True):
         suffix = 'Lệnh DROP đã thành công, nhưng lệnh CREATE chưa được xác nhận thành công.'
     elif state == 'created':
         suffix = 'Database đã được tạo lại, nhưng ứng dụng chưa mở được database đích.'
-    elif operation == 'server_connect' or (state == 'unchanged' and operation in ('drop_database', 'target_connect') and code in ('1044', '1045', '42501', '28P01')):
+    elif operation in ('server_connect', 'database_exists') or (state == 'unchanged' and operation in ('drop_database', 'target_connect') and code in ('1044', '1045', '42501', '28P01')):
         suffix = 'Ứng dụng chưa xóa/tạo lại database.'
     kind = type(exc).__name__
     # Never log str(exc), SQL, parameter values, credentials or XML contents.

@@ -43,7 +43,7 @@ host, port, database, username, password và TLS. Nhấn **Kiểm tra kết nố
 **Chuyển đổi & nhập**. Xem tiến độ và số bảng/dòng đã lưu.
 
 - **Database đã có:** bỏ chọn “Tạo database mới”; tài khoản cần quyền CONNECT, CREATE TABLE và INSERT.
-- **Database mới:** chọn “Tạo database mới”; chạy DROP DATABASE IF EXISTS rồi CREATE cùng tên, cần quyền DROP/CREATE DATABASE. PostgreSQL dùng database `postgres` để kết nối quản trị;
+- **Database mới:** chọn “Tạo database mới”; kiểm tra database tồn tại: có thì DROP rồi CREATE cùng tên, chưa có thì chỉ CREATE. PostgreSQL dùng database `postgres` để kết nối quản trị;
   MariaDB/MySQL kết nối máy chủ không chọn database trước, giống script gốc. **Nếu database đã tồn tại, toàn bộ dữ liệu trong đó sẽ bị xóa.**
 - Tên database: chữ Latin, số, `_`, tối đa 63 ký tự, không bắt đầu bằng số.
 - Host là địa chỉ **máy chủ web** truy cập được; không phải địa chỉ tương đối với máy đang mở trình duyệt.
@@ -94,7 +94,7 @@ Dừng bằng `docker compose down`.
 ## Chẩn đoán tác vụ thất bại
 
 Thông báo lỗi nhập dữ liệu cho biết giai đoạn chuyển XML/CSV hoặc nhập dữ liệu,
-loại exception và mã lỗi DB. Phần chuẩn bị database tách rõ **Kết nối máy chủ**, **DROP DATABASE**,
+loại exception và mã lỗi DB. Phần chuẩn bị database tách rõ **Kết nối máy chủ**, **Kiểm tra tồn tại**, **DROP DATABASE**,
 **CREATE DATABASE** và **Mở database đích**; nếu DROP thành công nhưng CREATE lỗi, thông báo nói rõ trạng thái đó.
 
 Với MariaDB/MySQL, kết nối để tạo database không chọn `information_schema` hay database đích trước,
@@ -134,8 +134,8 @@ Log chỉ ghi mã tác vụ, giai đoạn, thao tác, loại exception và mã l
   để lỗi một dòng không làm hỏng toàn bộ transaction. Commit sau khi duyệt các file CSV.
 - Kết quả hiển thị số dòng thành công, dòng lỗi, bảng lỗi và tối đa 20 chi tiết lỗi mỗi file,
   không chứa giá trị dữ liệu/SQL/mật khẩu. Nếu có lỗi, trạng thái là **Hoàn tất có lỗi**, không báo thành công toàn bộ.
-- Chỉ có một tùy chọn **Tạo database mới**: bật thì chạy `DROP DATABASE IF EXISTS` rồi `CREATE DATABASE`
-  cùng tên; tắt thì dùng database hiện có và giữ dữ liệu. Không có ô reset/xác nhận tên riêng.
+- Chỉ có một tùy chọn **Tạo database mới**: bật thì kiểm tra database tồn tại; có mới chạy `DROP DATABASE IF EXISTS` rồi `CREATE DATABASE`
+  cùng tên, chưa có thì chỉ chạy `CREATE DATABASE`; tắt thì dùng database hiện có và giữ dữ liệu. Không có ô reset/xác nhận tên riêng.
   **Khi bật, toàn bộ bảng/dữ liệu của database trùng tên sẽ bị xóa.** Tài khoản cần quyền DROP/CREATE DATABASE.
   Kiểm tra kết nối và duyệt database không bao giờ thực hiện DROP/CREATE.
 - Lỗi đọc file/CSV, commit, mất kết nối hoặc tiến trình bị dừng có thể làm tác vụ dừng và còn dữ liệu nhập dở,

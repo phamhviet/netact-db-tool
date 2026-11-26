@@ -9,7 +9,7 @@ from pathlib import Path
 
 from defusedxml.common import DefusedXmlException
 from defusedxml.expatreader import DefusedExpatParser
-from sqlalchemy import Column, MetaData, Table, Text, String, create_engine
+from sqlalchemy import Column, MetaData, Table, Text, String, create_engine, text
 from sqlalchemy.engine import URL
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.exc import SQLAlchemyError
@@ -43,6 +43,19 @@ def administration_engine(config):
     return engine_for(config, 'postgres' if config.db_type == 'postgres' else None)
 
 
+def database_exists(connection, config):
+    if config.db_type == 'postgres':
+        return connection.execute(text('SELECT 1 FROM pg_catalog.pg_database WHERE datname = :name'),
+                                  {'name': config.database}).scalar() is not None
+    # SHOW DATABASES lists the schemas visible to this account; no default
+    # information_schema connection or global SHOW DATABASES privilege is needed.
+    names = connection.exec_driver_sql('SHOW DATABASES').scalars().all()
+    case_insensitive = connection.exec_driver_sql('SELECT @@lower_case_table_names').scalar_one() != 0
+    if case_insensitive:
+        return config.database.casefold() in {name.casefold() for name in names}
+    return config.database in names
+
+
 def prepare_database(config):
     if config.create_database:
         admin = administration_engine(config)
@@ -52,9 +65,11 @@ def prepare_database(config):
             with admin.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
                 name = admin.dialect.identifier_preparer.quote_identifier(config.database)
                 suffix = ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci' if config.db_type != 'postgres' else ''
-                operation = 'drop_database'
-                conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
-                state = 'dropped'
+                operation = 'database_exists'
+                if database_exists(conn, config):
+                    operation = 'drop_database'
+                    conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
+                    state = 'dropped'
                 operation = 'create_database'
                 conn.exec_driver_sql(f'CREATE DATABASE {name}{suffix}')
         except SQLAlchemyError as exc:

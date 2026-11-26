@@ -471,3 +471,55 @@ def test_mariadb_schema_scoped_permissions(tmp_path):
             for account in (owner, limited):
                 conn.exec_driver_sql("DROP USER IF EXISTS %s@'%%'", (account,))
         root.dispose()
+
+
+def test_missing_database_creates_without_attempting_drop(monkeypatch):
+    if os.getenv('NETACT_TEST_DATABASES') != '1':
+        pytest.skip('Requires disposable MariaDB')
+    import importlib
+    from sqlalchemy import event
+    from app.errors import DatabaseOperationError
+    importer = importlib.import_module('app.importer')
+    suffix = uuid.uuid4().hex[:12]
+    database, account = 'createtest' + suffix, 'creator' + suffix
+    password = 'local-create-only-test'
+    root_cfg = ConnectionConfig(db_type='mariadb', host='127.0.0.1', port=53306,
+                                username='root', password='local-test-only', database=database)
+    root = engine_for(root_cfg, None)
+    name = root.dialect.identifier_preparer.quote_identifier(database)
+    creator_cfg = ConnectionConfig(**{**root_cfg.model_dump(), 'username': account, 'password': password,
+                                      'create_database': True})
+    creator = engine_for(creator_cfg, None)
+    ddl = []
+
+    @event.listens_for(creator, 'before_cursor_execute')
+    def track_ddl(conn, cursor, statement, parameters, context, executemany):
+        for operation in ('DROP DATABASE', 'CREATE DATABASE'):
+            if statement.startswith(operation):
+                ddl.append(operation)
+
+    target = None
+    try:
+        with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+            conn.exec_driver_sql("CREATE USER %s@'%%' IDENTIFIED BY %s", (account, password))
+            # CREATE on this schema only; deliberately no DROP privilege.
+            conn.exec_driver_sql(f"GRANT CREATE ON {name}.* TO %s@'%%'", (account,))
+        monkeypatch.setattr(importer, 'administration_engine', lambda config: creator)
+        target = prepare_database(creator_cfg)
+        with target.connect() as conn:
+            assert conn.exec_driver_sql('SELECT DATABASE()').scalar_one() == database
+        assert ddl == ['CREATE DATABASE']  # No DROP sent for a missing DB.
+        target.dispose()
+        # Now it exists, so DROP is attempted and a real permission denial surfaces.
+        with pytest.raises(DatabaseOperationError) as error:
+            prepare_database(creator_cfg)
+        assert error.value.operation == 'drop_database'
+        assert ddl == ['CREATE DATABASE', 'DROP DATABASE']
+    finally:
+        if target is not None:
+            target.dispose()
+        creator.dispose()
+        with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+            conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
+            conn.exec_driver_sql("DROP USER IF EXISTS %s@'%%'", (account,))
+        root.dispose()
