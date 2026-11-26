@@ -44,7 +44,7 @@ host, port, database, username, password và TLS. Nhấn **Kiểm tra kết nố
 
 - **Database đã có:** bỏ chọn “Tạo database mới”; tài khoản cần quyền CONNECT, CREATE TABLE và INSERT.
 - **Database mới:** chọn “Tạo database mới”; chạy DROP DATABASE IF EXISTS rồi CREATE cùng tên, cần quyền DROP/CREATE DATABASE. PostgreSQL dùng database `postgres` để kết nối quản trị;
-  MariaDB/MySQL dùng `information_schema`. **Nếu database đã tồn tại, toàn bộ dữ liệu trong đó sẽ bị xóa.**
+  MariaDB/MySQL kết nối máy chủ không chọn database trước, giống script gốc. **Nếu database đã tồn tại, toàn bộ dữ liệu trong đó sẽ bị xóa.**
 - Tên database: chữ Latin, số, `_`, tối đa 63 ký tự, không bắt đầu bằng số.
 - Host là địa chỉ **máy chủ web** truy cập được; không phải địa chỉ tương đối với máy đang mở trình duyệt.
 - PostgreSQL mặc định 5432; MariaDB/MySQL 3306. Có thể sửa port.
@@ -93,11 +93,25 @@ Dừng bằng `docker compose down`.
 
 ## Chẩn đoán tác vụ thất bại
 
-Thông báo lỗi nhập dữ liệu cho biết giai đoạn **Chuyển XML sang CSV**, **Kết nối/tạo database**
-hoặc **Tạo bảng/nhập CSV**, kèm loại exception và mã lỗi DB nếu driver cung cấp.
-Ví dụ MariaDB `1045` là lỗi xác thực, `1007` là database đã tồn tại, `1406` là giá trị vượt kiểu cột;
-PostgreSQL `42501` là thiếu quyền. Gửi nguyên thông báo mới nếu cần hỗ trợ, không cần gửi cả XML.
-Log máy chủ chỉ ghi mã tác vụ, giai đoạn, loại exception và mã lỗi, không ghi mật khẩu/câu SQL/dữ liệu XML.
+Thông báo lỗi nhập dữ liệu cho biết giai đoạn chuyển XML/CSV hoặc nhập dữ liệu,
+loại exception và mã lỗi DB. Phần chuẩn bị database tách rõ **Kết nối máy chủ**, **DROP DATABASE**,
+**CREATE DATABASE** và **Mở database đích**; nếu DROP thành công nhưng CREATE lỗi, thông báo nói rõ trạng thái đó.
+
+Với MariaDB/MySQL, kết nối để tạo database không chọn `information_schema` hay database đích trước,
+giống `mariadb.connect(user=..., password=..., host=..., port=...)` trong script gốc.
+Nút **Kiểm tra kết nối** chỉ chạy SELECT và hiển thị tài khoản đã xác thực từ `CURRENT_USER()` (`user@host`),
+không thực hiện DROP/CREATE. Kết nối thành công không đồng nghĩa đã có quyền xóa/tạo database.
+
+Nếu lỗi `1044`, xem lệnh bị từ chối và tài khoản DB thực tế:
+- `DROP DATABASE`: tài khoản cần quyền DROP trên đúng database.
+- `CREATE DATABASE`: tài khoản cần quyền CREATE trên đúng database.
+- `Mở database`: kiểm tra tên database và quyền truy cập.
+
+Dùng cùng host, port, username, password và tên database như script đang chạy được.
+Không cần cấp quyền toàn cục: có thể cấp DROP/CREATE và quyền bảng trong phạm vi database đích.
+Nếu thiếu quyền, nhờ người quản trị DB cấp quyền đúng phạm vi hoặc dùng tài khoản mà script gốc đang dùng.
+Không gửi mật khẩu hoặc toàn bộ SHOW GRANTS (có thể chứa thông tin xác thực) vào chat.
+Log chỉ ghi mã tác vụ, giai đoạn, thao tác, loại exception và mã lỗi; không ghi mật khẩu/SQL/dữ liệu XML.
 
 ## Hành vi nhập và xử lý lỗi
 

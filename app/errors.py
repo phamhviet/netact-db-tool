@@ -41,7 +41,21 @@ DATABASE_ERRORS = {
 }
 
 
+class DatabaseOperationError(Exception):
+    def __init__(self, operation, original, database, state='unchanged'):
+        super().__init__('Database operation failed')
+        self.operation = operation
+        self.original = original
+        self.database = database
+        self.state = state
+
+
 def failure_details(exc, stage, job_id, log_error=True):
+    operation = exc.operation if isinstance(exc, DatabaseOperationError) else None
+    database = exc.database if isinstance(exc, DatabaseOperationError) else None
+    state = exc.state if isinstance(exc, DatabaseOperationError) else None
+    if isinstance(exc, DatabaseOperationError):
+        exc = exc.original
     code = None
     reason = 'Lỗi chưa phân loại. Gửi giai đoạn và loại lỗi bên dưới để kiểm tra tiếp.'
     if isinstance(exc, DBAPIError):
@@ -62,11 +76,28 @@ def failure_details(exc, stage, job_id, log_error=True):
     elif isinstance(exc, UnicodeError):
         reason = 'Không giải mã được dữ liệu. Kiểm tra encoding XML/CSV.'
     label = STAGES[stage]
+    if operation:
+        label = {'server_connect': 'Kết nối máy chủ database (không chọn database đích)',
+                 'drop_database': f'DROP DATABASE [{database}]',
+                 'create_database': f'CREATE DATABASE [{database}]',
+                 'target_connect': f'Mở database [{database}]'}[operation]
+    if code in ('1044', '42501') and operation:
+        reason = {'drop_database': 'Tài khoản không có quyền DROP database này.',
+                  'create_database': 'Tài khoản không có quyền CREATE database này.',
+                  'target_connect': 'Tài khoản không có quyền truy cập database đích. Kiểm tra đúng tên database và tài khoản.',
+                  'server_connect': 'Máy chủ từ chối truy cập. Kiểm tra tài khoản được cấp quyền theo host kết nối.'}[operation]
+    suffix = 'Database mới tạo có thể vẫn còn; kiểm tra trước khi thử lại.'
+    if state == 'dropped':
+        suffix = 'Lệnh DROP đã thành công, nhưng lệnh CREATE chưa được xác nhận thành công.'
+    elif state == 'created':
+        suffix = 'Database đã được tạo lại, nhưng ứng dụng chưa mở được database đích.'
+    elif operation == 'server_connect' or (state == 'unchanged' and operation in ('drop_database', 'target_connect') and code in ('1044', '1045', '42501', '28P01')):
+        suffix = 'Ứng dụng chưa xóa/tạo lại database.'
     kind = type(exc).__name__
     # Never log str(exc), SQL, parameter values, credentials or XML contents.
     if log_error:
-        logger.error('job=%s stage=%s exception=%s code=%s', job_id, stage, kind, code or 'none')
+        logger.error('job=%s stage=%s operation=%s exception=%s code=%s',
+                     job_id, stage, operation or 'none', kind, code or 'none')
     identifier = f'{kind}, mã {code}' if code else kind
-    return {'stage': stage, 'error_code': code, 'error_type': kind,
-            'message': f'{label} thất bại ({identifier}). {reason} '
-                       'Database mới tạo có thể vẫn còn; kiểm tra trước khi thử lại.'}
+    return {'stage': stage, 'operation': operation, 'error_code': code, 'error_type': kind,
+            'message': f'{label} thất bại ({identifier}). {reason} {suffix}'}

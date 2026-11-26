@@ -11,11 +11,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.errors import failure_details
+from app.errors import failure_details, DatabaseOperationError
 from app.config import ConnectionConfig
 from app.browser import router as browser_router
-from app.importer import ImportFailure, convert, engine_for, import_csvs, prepare_database
+from app.importer import ImportFailure, convert, engine_for, import_csvs, prepare_database, administration_engine
 
 app = FastAPI(title='NetAct XML → Database', docs_url=None, redoc_url=None)
 app.include_router(browser_router)
@@ -42,8 +43,12 @@ def run_job(job_id, config, folder):
         update(job_id, progress=40, message=f'Đã tạo {len(files)} CSV. Đang kết nối database…')
         stage = 'database_connect'
         engine = prepare_database(config)
-        with engine.connect() as connection:
-            connection.execute(text('SELECT 1'))
+        try:
+            with engine.connect() as connection:
+                connection.execute(text('SELECT 1'))
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationError('target_connect', exc, config.database,
+                                         'created' if config.create_database else 'unchanged') from None
         stage = 'csv_to_database'
         result = import_csvs(engine, files, lambda percent, message: update(job_id, progress=percent, message=message))
         failed_rows = sum(t['rows_failed'] for t in result)
@@ -95,14 +100,18 @@ def health():
 
 @app.post('/api/connection')
 def test_connection(config: ConnectionConfig):
-    # Read-only: never create a database from the connection-test button.
-    engine = engine_for(config, ('postgres' if config.db_type == 'postgres' else 'information_schema') if config.create_database else None)
+    # Read-only: use the same login path as import without running DROP/CREATE.
+    engine = administration_engine(config) if config.create_database else engine_for(config)
     try:
         with engine.connect() as conn:
             conn.execute(text('SELECT 1')).scalar_one()
-        return {'ok': True, 'message': 'Kết nối thành công. Quyền tạo database/bảng sẽ được kiểm tra khi nhập.'}
-    except Exception:
-        raise HTTPException(400, 'Không kết nối được. Kiểm tra host, port, tài khoản, TLS và database.') from None
+            identity = conn.execute(text('SELECT CURRENT_USER()' if config.db_type != 'postgres' else 'SELECT CURRENT_USER')).scalar_one()
+        return {'ok': True, 'authenticated_as': identity,
+                'message': f'Kết nối thành công. Tài khoản DB thực tế: {identity}. Chưa thực hiện DROP/CREATE.'}
+    except Exception as exc:
+        operation = 'server_connect' if config.create_database else 'target_connect'
+        details = failure_details(DatabaseOperationError(operation, exc, config.database), 'database_connect', 'connection-test')
+        raise HTTPException(400, details['message']) from None
     finally:
         engine.dispose()
 

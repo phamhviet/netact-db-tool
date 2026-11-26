@@ -387,3 +387,87 @@ def verify_original_script_cases(engine, folder, db_type):
 def test_script_column_name_contract():
     assert script_column_names([' A ', 'A', 'A_1', '', 'A', 'a']) == ['A', 'A_1', 'A_1_1', 'unknown_column', 'A_2', 'a']
     assert script_column_names(['漢' * 70])[0] == '漢' * 64
+
+
+def test_mariadb_schema_scoped_permissions(tmp_path):
+    if os.getenv('NETACT_TEST_DATABASES') != '1':
+        pytest.skip('Requires the disposable MariaDB test service')
+    from app.errors import DatabaseOperationError, failure_details
+    from app.importer import administration_engine
+    suffix = uuid.uuid4().hex[:12]
+    database = 'scopetest' + suffix
+    owner = 'owner' + suffix
+    limited = 'limited' + suffix
+    password = 'local-scoped-test-only'
+    root_config = ConnectionConfig(db_type='mariadb', host='127.0.0.1', port=53306,
+                                   username='root', password='local-test-only', database=database)
+    root = engine_for(root_config, None)
+    quoted = root.dialect.identifier_preparer.quote_identifier(database)
+    owned = denied = None
+    try:
+        with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+            for account in (owner, limited):
+                conn.exec_driver_sql("CREATE USER %s@'%%' IDENTIFIED BY %s", (account, password))
+            conn.exec_driver_sql(f"GRANT ALL PRIVILEGES ON {quoted}.* TO %s@'%%'", (owner,))
+        cfg = ConnectionConfig(**{**root_config.model_dump(), 'username': owner, 'password': password, 'create_database': True})
+        admin = administration_engine(cfg)
+        assert admin.url.database is None  # No information_schema or target DB selected.
+        admin.dispose()
+        response = client.post('/api/connection', json={**cfg.model_dump(mode='json'), 'password': password})
+        assert response.status_code == 200, response.text
+        assert response.json()['authenticated_as'] == owner + '@%'
+        owned = prepare_database(cfg)
+        with owned.begin() as conn:
+            conn.exec_driver_sql('CREATE TABLE sentinel (value VARCHAR(10))')
+            conn.exec_driver_sql("INSERT INTO sentinel VALUES ('preserved')")
+        with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+            conn.exec_driver_sql(f"GRANT SELECT, INSERT, CREATE ON {quoted}.* TO %s@'%%'", (limited,))
+        denied_config = {**cfg.model_dump(mode='json'), 'username': limited, 'password': password}
+        limited_cfg = ConnectionConfig(**denied_config)
+        # SELECT 1 / CURRENT_USER does not require database recreation privileges.
+        assert client.post('/api/connection', json=denied_config).status_code == 200
+        with pytest.raises(DatabaseOperationError) as caught:
+            prepare_database(limited_cfg)
+        details = failure_details(caught.value, 'database_connect', 'test', log_error=False)
+        assert details['operation'] == 'drop_database'
+        assert details['error_code'] == '1044'
+        assert 'quyền DROP' in details['message']
+        assert password not in json.dumps(details)
+        with owned.connect() as conn:
+            assert conn.exec_driver_sql('SELECT value FROM sentinel').scalar_one() == 'preserved'
+        with FIXTURE.open('rb') as source:
+            response = client.post('/api/jobs', data={'config': json.dumps(denied_config)},
+                                   files={'file': ('sample.xml', source, 'application/xml')})
+        assert response.status_code == 202
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            job = client.get('/api/jobs/' + response.json()['id']).json()
+            if job['status'] == 'failed':
+                break
+            time.sleep(.05)
+        assert job['operation'] == 'drop_database'
+        assert job['error_code'] == '1044'
+        assert password not in json.dumps(job)
+        # The owner has privileges only on this schema, and can recreate it.
+        owned.dispose()
+        owned = prepare_database(cfg)
+        assert inspect(owned).get_table_names() == []
+        owned.dispose()
+        # Distinguish successful DROP followed by denied CREATE.
+        with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+            conn.exec_driver_sql(f"REVOKE CREATE ON {quoted}.* FROM %s@'%%'", (limited,))
+            conn.exec_driver_sql(f"GRANT DROP ON {quoted}.* TO %s@'%%'", (limited,))
+        with pytest.raises(DatabaseOperationError) as caught:
+            prepare_database(limited_cfg)
+        details = failure_details(caught.value, 'database_connect', 'test', log_error=False)
+        assert details['operation'] == 'create_database'
+        assert details['error_code'] == '1044'
+        assert 'DROP đã thành công' in details['message']
+    finally:
+        if owned is not None:
+            owned.dispose()
+        with root.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+            conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {quoted}')
+            for account in (owner, limited):
+                conn.exec_driver_sql("DROP USER IF EXISTS %s@'%%'", (account,))
+        root.dispose()

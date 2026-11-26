@@ -14,17 +14,18 @@ from sqlalchemy.engine import URL
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.errors import failure_details
+from app.errors import failure_details, DatabaseOperationError
 
 ROOT = Path(__file__).resolve().parents[1]
 csv.field_size_limit(16 * 1024 * 1024)
+_DEFAULT_DATABASE = object()
 
 
 class ImportFailure(Exception):
     pass
 
 
-def engine_for(config, database=None):
+def engine_for(config, database=_DEFAULT_DATABASE):
     driver = {'mariadb': 'mysql+pymysql', 'mysql': 'mysql+pymysql', 'postgres': 'postgresql+psycopg'}[config.db_type]
     options = {'connect_timeout': 10}
     if config.db_type == 'postgres':
@@ -32,19 +33,32 @@ def engine_for(config, database=None):
     elif config.ssl_mode == 'verify-full':
         options['ssl'] = {'check_hostname': True}
     return create_engine(URL.create(driver, username=config.username, password=config.password.get_secret_value(),
-                         host=config.host, port=config.port, database=database or config.database),
+                         host=config.host, port=config.port, database=config.database if database is _DEFAULT_DATABASE else database),
                          connect_args=options, pool_pre_ping=True)
+
+
+def administration_engine(config):
+    # Match mariadb.connect(user=..., password=..., host=..., port=...) in the
+    # supplied script: no database is selected before DROP/CREATE on MySQL/MariaDB.
+    return engine_for(config, 'postgres' if config.db_type == 'postgres' else None)
 
 
 def prepare_database(config):
     if config.create_database:
-        admin = engine_for(config, 'postgres' if config.db_type == 'postgres' else 'information_schema')
+        admin = administration_engine(config)
+        operation = 'server_connect'
+        state = 'unchanged'
         try:
             with admin.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
                 name = admin.dialect.identifier_preparer.quote_identifier(config.database)
                 suffix = ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci' if config.db_type != 'postgres' else ''
+                operation = 'drop_database'
                 conn.exec_driver_sql(f'DROP DATABASE IF EXISTS {name}')
+                state = 'dropped'
+                operation = 'create_database'
                 conn.exec_driver_sql(f'CREATE DATABASE {name}{suffix}')
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationError(operation, exc, config.database, state) from None
         finally:
             admin.dispose()
     return engine_for(config)
