@@ -142,7 +142,14 @@ def script_column_names(headers):
     return columns
 
 
-def import_csvs(engine, files, progress):
+def import_values(row, column_count, source_filename):
+    values = (row + [""] * column_count)[:column_count]
+    if source_filename is not None:
+        values[0] = source_filename
+    return values
+
+
+def import_csvs(engine, files, progress, *, source_filename=None):
     results = []
     postgres = engine.dialect.name == "postgresql"
     with engine.connect() as conn:
@@ -187,9 +194,10 @@ def import_csvs(engine, files, progress):
                 report["columns"] = [
                     {"source": a, "target": b} for a, b in zip(headers, columns, strict=True)
                 ]
+                filename = source_filename if headers and headers[0].strip().upper() == "FILENAME" else None
                 max_lengths = [0] * len(columns)
                 for row in reader:
-                    for position, value in enumerate(row[: len(columns)]):
+                    for position, value in enumerate(import_values(row, len(columns), filename)):
                         max_lengths[position] = max(max_lengths[position], len(value))
                 types = [Text() if length > 255 else String(max(1, length)) for length in max_lengths]
                 # A separate MetaData per file permits truncated filenames to reuse the
@@ -224,8 +232,7 @@ def import_csvs(engine, files, progress):
                 # Use the native mariadb '?' placeholders, matching the source script.
                 statement = f"INSERT INTO {quoted} VALUES ({placeholders})"
                 for line, row in enumerate(reader, 2):
-                    values = (row + [""] * len(columns))[: len(columns)]
-                    parameters = tuple(values)
+                    parameters = tuple(import_values(row, len(columns), filename))
                     try:
                         if postgres:
                             # PostgreSQL needs a savepoint to continue after a failed row.

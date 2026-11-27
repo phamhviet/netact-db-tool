@@ -160,7 +160,7 @@ There is no application XML upload-size limit, fixed JAR heap limit, or conversi
 Allow disk space for multipart spooling, the original XML, normalized XML and generated CSV files. A reverse proxy may have separate upload/time limits (Nginx: `client_max_body_size 0;`).
 
 The parser requires Nokia RAML20 with managedObject elements. DOCTYPE declarations without entities are normalized away before invoking Java; external DTDs are not fetched. Entity declarations are rejected. XML syntax errors identify the original line/column.
-Temporary import files are deleted after completion/failure. The JAR receives a temporary `input.xml`, so its FILENAME column uses that name.
+Temporary import files are deleted after completion/failure. The imported first `FILENAME` column stores the original uploaded XML filename (including its extension), rather than the internal temporary `input.xml` name. Directory paths are removed. This applies to new imports; previously imported rows are unchanged. Existing table column widths are preserved, so an old short `FILENAME` column may need widening before appending longer filenames.
 Import status is in memory (up to 100 recent jobs); restarting loses live status. Import failures can leave partial data, especially with MariaDB/MySQL implicit DDL commits. Check results before retrying.
 
 <details>

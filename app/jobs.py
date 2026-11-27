@@ -29,7 +29,7 @@ def update(job_id, **fields):
         jobs[job_id].update(fields)
 
 
-def run_job(job_id, config, folder):
+def run_job(job_id, config, folder, source_filename):
     engine = None
     stage = "xml_to_csv"
     try:
@@ -47,7 +47,10 @@ def run_job(job_id, config, folder):
             ) from None
         stage = "csv_to_database"
         result = import_csvs(
-            engine, files, lambda percent, message: update(job_id, progress=percent, message=message)
+            engine,
+            files,
+            lambda percent, message: update(job_id, progress=percent, message=message),
+            source_filename=source_filename,
         )
         failed_rows = sum(t["rows_failed"] for t in result)
         failed_tables = sum(t["status"] == "failed_create" for t in result)
@@ -117,7 +120,9 @@ async def create_job(config: Annotated[str, Form()], file: Annotated[UploadFile,
                 "create_database": settings.create_database,
                 "tables": [],
             }
-        executor.submit(run_job, job_id, settings, folder)
+        # Treat the upload name as data only; never use a client-supplied path on disk.
+        source_filename = file.filename.replace("\\", "/").rsplit("/", 1)[-1]
+        executor.submit(run_job, job_id, settings, folder, source_filename)
         submitted = True
         return {"id": job_id}
     finally:

@@ -261,7 +261,7 @@ Nếu script lấy cấu hình qua hàm/biến phức tạp thay vì hằng lite
   XML phải đúng Nokia RAML20. Hỗ trợ khai báo DOCTYPE không chứa entity: ứng dụng chuẩn hóa XML theo luồng
   sang UTF-8 và loại DOCTYPE trước khi gọi JAR, không tải DTD ngoài. File upload gốc không bị sửa.
   Khai báo entity bị từ chối; cần xuất XML với giá trị trực tiếp. Lỗi cú pháp được báo theo dòng/cột của file gốc.
-  Đây không phải bộ chuyển đổi cho mọi cấu trúc XML. File tạm có tên `input.xml`, nên cột FILENAME của CSV mang tên đó.
+  Đây không phải bộ chuyển đổi cho mọi cấu trúc XML. Cột đầu `FILENAME` trong database lưu tên file XML thực tế đã upload, bao gồm phần mở rộng và bỏ đường dẫn thư mục. Áp dụng cho các lần import mới; dữ liệu cũ không tự đổi. Nếu import nối vào bảng cũ có cột `FILENAME` quá ngắn, cần tăng độ rộng cột trước.
 - XML, CSV và log JAR tạm bị xóa sau tác vụ; không ghi mật khẩu nhập trên form vào file cấu hình, log hoặc kết quả.
   Mật khẩu dùng trong bộ nhớ của tiến trình để kết nối và được xóa khỏi form sau khi nhận tác vụ.
   Metadata kết quả giữ tối đa 100 tác vụ/24 giờ trong bộ nhớ, mất khi khởi động lại.

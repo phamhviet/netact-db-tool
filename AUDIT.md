@@ -45,3 +45,9 @@ One nonblocking warning remains in the test tooling: the upstream Starlette Test
 - **Audit scope:** this is a code/dependency review and functional validation, not a penetration test or a full operating-system/container/JAR vulnerability audit. The supplied parser JAR was retained unchanged.
 
 See [README_EN.md](README_EN.md) for operation, setup and recovery details.
+
+## Filename regression validation — 2026-11-27
+
+Uploaded XML basenames now replace the first `FILENAME` value during both column sizing and row insertion. Client-supplied filenames remain data and are never used as local storage paths. Other columns and direct CSV imports without an uploaded filename retain their values.
+
+Validation: **59 tests passed, 0 skipped** with MariaDB 10.11, MySQL 8.4 and PostgreSQL 17. This includes real upload/JAR/import checks of the stored filename, Unicode/long names, multiple tables and Windows/Unix path stripping. Ruff lint/format and whitespace checks passed. Existing rows and existing table widths are not migrated; widen an old short `FILENAME` column before appending longer names.

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect
+from sqlalchemy import create_engine, inspect
 
 from app.database import engine_for, prepare_database
 from app.importer import ImportFailure, convert, import_csvs, normalize_xml, script_column_names, unique_names
@@ -289,7 +289,7 @@ def test_real_database_workflow(db_type, port, user, tmp_path, monkeypatch):
             response = client.post(
                 "/api/jobs",
                 data={"config": json.dumps(api_config)},
-                files={"file": ("sample.xml", upload, "application/xml")},
+                files={"file": ("NAQ0902N_20261127.xml", upload, "application/xml")},
             )
         assert response.status_code == 202, response.text
         job_id = response.json()["id"]
@@ -310,6 +310,10 @@ def test_real_database_workflow(db_type, port, user, tmp_path, monkeypatch):
                 f"SELECT {q('name')}, {q('id')} FROM {q(table)} ORDER BY {q('id')}"
             ).all()
         assert rows == [("Trạm Hà Nội", "001"), ("Station B", "002")]
+        with target.connect() as conn:
+            assert conn.exec_driver_sql(
+                f"SELECT DISTINCT {q('FILENAME')} FROM {q(table)}"
+            ).scalars().all() == ["NAQ0902N_20261127.xml"]
         browse = {"config": api_config}
         listing = client.post("/api/browser/tables", json=browse)
         assert listing.status_code == 200, listing.text
@@ -723,8 +727,9 @@ def test_xml_upload_spools_multiple_megabytes_without_size_cap(monkeypatch):
     captured = []
     payload = b"<raml>" + b" " * (5 * 1024 * 1024) + b"</raml>"
 
-    def capture_submit(callback, job_id, config, folder):
+    def capture_submit(callback, job_id, config, folder, source_filename):
         captured.append(folder)
+        assert source_filename == "large.xml"
 
     monkeypatch.setattr(jobs.executor, "submit", capture_submit)
     config = dict(
@@ -743,3 +748,63 @@ def test_xml_upload_spools_multiple_megabytes_without_size_cap(monkeypatch):
         if captured:
             shutil.rmtree(captured[0], ignore_errors=True)
             jobs.active.release()
+
+
+@pytest.mark.parametrize("upload_name", ["../../actual export.xml", r"C:\fakepath\actual export.xml"])
+def test_upload_filename_is_data_not_a_filesystem_path(monkeypatch, upload_name):
+    import importlib
+    import shutil
+
+    jobs = importlib.import_module("app.jobs")
+    captured = []
+
+    def capture_submit(callback, job_id, config, folder, source_filename):
+        captured.append(folder)
+        assert source_filename == "actual export.xml"
+        assert (folder / "input.xml").read_bytes() == FIXTURE.read_bytes()
+        assert not (folder / source_filename).exists()
+
+    monkeypatch.setattr(jobs.executor, "submit", capture_submit)
+    config = dict(host="localhost", port=3306, username="unused", database="unused")
+    try:
+        response = client.post(
+            "/api/jobs",
+            data={"config": json.dumps(config)},
+            files={"file": (upload_name, FIXTURE.read_bytes(), "application/xml")},
+        )
+        assert response.status_code == 202, response.text
+        assert len(captured) == 1
+    finally:
+        if captured:
+            shutil.rmtree(captured[0], ignore_errors=True)
+            jobs.active.release()
+
+
+@pytest.mark.parametrize("source_filename", ["Bản xuất NetAct 20261127.xml", "長" * 260 + ".xml"])
+def test_filename_replacement_sizes_all_tables_and_preserves_other_columns(tmp_path, source_filename):
+    engine = create_engine("sqlite://")
+    files = []
+    for name, headers, row in [
+        ("LNBTS", ["FILENAME", "name"], ["input.xml", "input.xml"]),
+        ("LNCEL", ["FILENAME", "name"], ["input.xml", "Cell 001"]),
+        ("OTHER", ["name", "FILENAME"], ["input.xml", "keep.xml"]),
+    ]:
+        path = tmp_path / f"{name}.csv"
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerows([headers, row])
+        files.append(path)
+    try:
+        report = import_csvs(engine, files, lambda *_: None, source_filename=source_filename)
+        assert all(item["rows"] == 1 and item["rows_failed"] == 0 for item in report)
+        with engine.connect() as conn:
+            assert conn.exec_driver_sql('SELECT * FROM "LNBTS"').one() == (source_filename, "input.xml")
+            assert conn.exec_driver_sql('SELECT * FROM "LNCEL"').one() == (source_filename, "Cell 001")
+            assert conn.exec_driver_sql('SELECT * FROM "OTHER"').one() == ("input.xml", "keep.xml")
+        kind = inspect(engine).get_columns("LNBTS")[0]["type"]
+        if len(source_filename) <= 255:
+            assert kind.length == len(source_filename)
+        else:
+            assert str(kind) == "TEXT"
+    finally:
+        engine.dispose()
