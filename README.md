@@ -11,7 +11,9 @@ The interface and runtime messages are in English. Accent color: `#266880`.
 
 ![XML import workspace with Nokia logo and author attribution](docs/interface.png)
 
-The current interface includes XML import, table browsing and a SQL workspace. Screenshots below use local sample data.
+The interface uses compact navigation, grouped forms and collapsible connection settings. It includes XML import, table browsing and a SQL workspace. Screenshots below use local sample data.
+
+Design method: [Unslop by Damir Sokolovsky](https://github.com/heydamir/unslop), CC BY 4.0. See the [redesign review and checks](docs/ui-redesign.md).
 
 [Mobile import view](docs/interface-mobile.png) · [Mobile table browser](docs/database-explorer-mobile.png) · [Mobile SQL workspace](docs/sql-workspace-mobile.png)
 

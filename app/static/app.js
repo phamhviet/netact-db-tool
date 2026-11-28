@@ -11,7 +11,7 @@ const request = window.NetActUI.request;
 function setBusy(value) {
   busy = value;
   $('submit').setAttribute('aria-busy', String(value));
-  $('submit').firstChild.textContent = value ? 'Processing… ' : 'Convert & import ';
+  $('submit').firstChild.textContent = value ? 'Processing…' : 'Convert & import';
   for (const control of form.querySelectorAll('input,select,button')) control.disabled = value;
   if (!value) {
     $('tls-require').disabled = $('db_type').value !== 'postgres';
@@ -30,8 +30,8 @@ for (const id of ['db_type', 'database', 'host', 'port', 'create_database']) $(i
 function showFile() {
   const file = $('xml-file').files[0];
   updateSummary();
-  $('filename').textContent = file ? file.name : 'Drop an XML file or browse';
-  $('filedetail').textContent = file ? `${(file.size / 1024 ** 2).toFixed(2)} MB · ready to convert` : 'Click to select a file from your computer';
+  $('filename').textContent = file ? file.name : 'Choose XML or drop it here';
+  $('filedetail').textContent = file ? `${(file.size / 1024 ** 2).toFixed(2)} MB · ready to convert` : 'Select a Nokia RAML20 export';
 }
 $('xml-file').addEventListener('change', showFile);
 const zone = $('dropzone');

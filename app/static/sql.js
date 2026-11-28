@@ -50,7 +50,7 @@
     finally {
       busy=false;window.NetActBrowser.setBusy(false);
       for(const id of ['sql-run','sql-clear','sql-file','sql-schema','sql-preview-limit'])el(id).disabled=false;
-      el('sql-run').textContent='Run script →';
+      el('sql-run').textContent='Run script';
     }
   }
   el('sql-run').addEventListener('click',execute);

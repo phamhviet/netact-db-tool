@@ -51,3 +51,7 @@ See [README_EN.md](README_EN.md) for operation, setup and recovery details.
 Uploaded XML basenames now replace the first `FILENAME` value during both column sizing and row insertion. Client-supplied filenames remain data and are never used as local storage paths. Other columns and direct CSV imports without an uploaded filename retain their values.
 
 Validation: **59 tests passed, 0 skipped** with MariaDB 10.11, MySQL 8.4 and PostgreSQL 17. This includes real upload/JAR/import checks of the stored filename, Unicode/long names, multiple tables and Windows/Unix path stripping. Ruff lint/format and whitespace checks passed. Existing rows and existing table widths are not migrated; widen an old short `FILENAME` column before appending longer names.
+
+## UI redesign validation — 2026-11-28
+
+The Unslop UI pass changed presentation and connected-form disclosure behavior. Browser validation covered responsive layouts and a real MariaDB import/browse/SQL/export workflow. The default Python suite passed (42 passed, 17 optional integration cases skipped). See [the design review](docs/ui-redesign.md) for the audit, skill attribution, direction and exact scope.

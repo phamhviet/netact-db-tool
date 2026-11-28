@@ -12,8 +12,7 @@
   for (const button of document.querySelectorAll('[data-view]')) {
     button.addEventListener('click', () => {
       const browse = button.dataset.view === 'browser';
-      el('workspace-label').textContent = browse ? 'DATA TOOLS / Database browser' : 'DATA TOOLS / XML Import';
-      el('workspace-badge').textContent = browse ? 'DATABASE VIEWER' : 'NOKIA RAML20';
+      el('workspace-label').textContent = browse ? 'NetAct / Database browser' : 'NetAct / XML import';
       document.querySelectorAll('[data-view]').forEach(node => node.setAttribute('aria-pressed', String(node === button)));
       el('browser-view').hidden = !browse; el('import-view').hidden = browse;
       document.querySelectorAll('[data-view]').forEach(node => node.classList.toggle('active', node === button));
@@ -101,6 +100,9 @@
       el('browse-password').value = '';
       fieldIds.forEach(id => {el(`browse-${id}`).disabled = true;});
       el('browse-disconnect').hidden = false;
+      el('browse-settings').open = false;
+      el('browse-connect').hidden = true;
+      el('browse-connect-form').closest('.connection-panel').classList.add('is-connected');
       el('browse-connection').textContent = `Connected to ${connection.host}:${connection.port} / ${connection.database}`;
       el('browse-connection').className = 'success';
     } catch (error) {
@@ -118,6 +120,9 @@
     fieldIds.forEach(id => {el(`browse-${id}`).disabled = false;});
     el('browse-password').value = ''; el('browse-tls-require').disabled = el('browse-db_type').value !== 'postgres';
     el('browse-connect').disabled = false;
+    el('browse-connect').hidden = false;
+    el('browse-settings').open = true;
+    el('browse-connect-form').closest('.connection-panel').classList.remove('is-connected');
     window.NetActPresets.refresh('browse-');
   });
   window.NetActBrowser = {connection: () => connection, setBusy(value) {setLoading(value); el('browse-disconnect').disabled=value;}};
